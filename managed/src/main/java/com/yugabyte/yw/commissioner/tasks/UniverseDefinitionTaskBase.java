@@ -113,6 +113,58 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
   }
 
   /**
+   * This sets the user intent from the task params to the universe.
+   *
+   * @param universe
+   * @param isReadOnlyCreate
+   */
+  public void setUserIntentToUniverse(Universe universe, boolean isReadOnlyCreate) {
+    // Persist the updated information about the universe.
+    // It should have been marked as being edited in lockUniverseForUpdate().
+    UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
+    if (!universeDetails.updateInProgress) {
+      String msg =
+          "Universe " + taskParams().universeUUID + " has not been marked as being updated.";
+      log.error(msg);
+      throw new RuntimeException(msg);
+    }
+    if (!isReadOnlyCreate) {
+      universeDetails.nodeDetailsSet = taskParams().nodeDetailsSet;
+      universeDetails.nodePrefix = taskParams().nodePrefix;
+      universeDetails.universeUUID = taskParams().universeUUID;
+      universeDetails.allowInsecure = taskParams().allowInsecure;
+      universeDetails.rootAndClientRootCASame = taskParams().rootAndClientRootCASame;
+      Cluster cluster = taskParams().getPrimaryCluster();
+      if (cluster != null) {
+        universeDetails.rootCA = null;
+        universeDetails.clientRootCA = null;
+        if (CertificateHelper.isRootCARequired(taskParams())) {
+          universeDetails.rootCA = taskParams().rootCA;
+        }
+        if (CertificateHelper.isClientRootCARequired(taskParams())) {
+          universeDetails.clientRootCA = taskParams().clientRootCA;
+        }
+        universeDetails.upsertPrimaryCluster(cluster.userIntent, cluster.placementInfo);
+      } // else read only cluster edit mode.
+    } else {
+      // Combine the existing nodes with new read only cluster nodes.
+      universeDetails.nodeDetailsSet.addAll(taskParams().nodeDetailsSet);
+    }
+    taskParams()
+        .getReadOnlyClusters()
+        .forEach(
+            (async) -> {
+              // Update read replica cluster TLS params to be same as primary cluster
+              async.userIntent.enableNodeToNodeEncrypt =
+                  universeDetails.getPrimaryCluster().userIntent.enableNodeToNodeEncrypt;
+              async.userIntent.enableClientToNodeEncrypt =
+                  universeDetails.getPrimaryCluster().userIntent.enableClientToNodeEncrypt;
+              universeDetails.upsertCluster(async.userIntent, async.placementInfo, async.uuid);
+            });
+    universe.setUniverseDetails(universeDetails);
+  }
+
+  /**
    * Writes all the user intent to the universe.
    *
    * @return
@@ -131,50 +183,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     // Create the update lambda.
     UniverseUpdater updater =
         universe -> {
-          // Persist the updated information about the universe.
-          // It should have been marked as being edited in lockUniverseForUpdate().
-          UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
-          if (!universeDetails.updateInProgress) {
-            String msg =
-                "Universe " + taskParams().universeUUID + " has not been marked as being updated.";
-            log.error(msg);
-            throw new RuntimeException(msg);
-          }
-          if (!isReadOnlyCreate) {
-            universeDetails.nodeDetailsSet = taskParams().nodeDetailsSet;
-            universeDetails.nodePrefix = taskParams().nodePrefix;
-            universeDetails.universeUUID = taskParams().universeUUID;
-            universeDetails.allowInsecure = taskParams().allowInsecure;
-            universeDetails.rootAndClientRootCASame = taskParams().rootAndClientRootCASame;
-            Cluster cluster = taskParams().getPrimaryCluster();
-            if (cluster != null) {
-              universeDetails.rootCA = null;
-              universeDetails.clientRootCA = null;
-              if (CertificateHelper.isRootCARequired(taskParams())) {
-                universeDetails.rootCA = taskParams().rootCA;
-              }
-              if (CertificateHelper.isClientRootCARequired(taskParams())) {
-                universeDetails.clientRootCA = taskParams().clientRootCA;
-              }
-              universeDetails.upsertPrimaryCluster(cluster.userIntent, cluster.placementInfo);
-            } // else read only cluster edit mode.
-          } else {
-            // Combine the existing nodes with new read only cluster nodes.
-            universeDetails.nodeDetailsSet.addAll(taskParams().nodeDetailsSet);
-          }
-          taskParams()
-              .getReadOnlyClusters()
-              .forEach(
-                  (async) -> {
-                    // Update read replica cluster TLS params to be same as primary cluster
-                    async.userIntent.enableNodeToNodeEncrypt =
-                        universeDetails.getPrimaryCluster().userIntent.enableNodeToNodeEncrypt;
-                    async.userIntent.enableClientToNodeEncrypt =
-                        universeDetails.getPrimaryCluster().userIntent.enableClientToNodeEncrypt;
-                    universeDetails.upsertCluster(
-                        async.userIntent, async.placementInfo, async.uuid);
-                  });
-          universe.setUniverseDetails(universeDetails);
+          setUserIntentToUniverse(universe, isReadOnlyCreate);
         };
     // Perform the update. If unsuccessful, this will throw a runtime exception which we do not
     // catch as we want to fail.

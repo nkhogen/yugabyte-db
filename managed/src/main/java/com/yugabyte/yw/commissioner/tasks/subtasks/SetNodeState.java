@@ -27,6 +27,7 @@ public class SetNodeState extends NodeTaskBase {
 
   public static class Params extends NodeTaskParams {
     public NodeDetails.NodeState state;
+    public NodeDetails.NodeSubState subState;
   }
 
   protected Params taskParams() {

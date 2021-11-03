@@ -64,6 +64,9 @@ public class AnsibleClusterServerCtl extends NodeTaskBase {
       ShellResponse response =
           getNodeManager().nodeCommand(NodeManager.NodeCommandType.Control, taskParams());
       processShellResponse(response);
+      if (taskParams().targetNodeStatus != null) {
+        setNodeStatus(taskParams().targetNodeStatus);
+      }
     } catch (Exception e) {
       if (!taskParams().isForceDelete) {
         throw e;

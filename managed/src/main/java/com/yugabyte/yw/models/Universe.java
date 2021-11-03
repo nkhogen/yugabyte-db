@@ -80,6 +80,10 @@ public class Universe extends Model {
     V2TO3
   }
 
+  public enum UniverseState {
+  // TODO
+  }
+
   // The universe UUID.
   @Id public UUID universeUUID;
 

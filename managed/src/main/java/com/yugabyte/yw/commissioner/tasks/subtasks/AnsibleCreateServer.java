@@ -73,6 +73,9 @@ public class AnsibleCreateServer extends NodeTaskBase {
       ShellResponse response =
           getNodeManager().nodeCommand(NodeManager.NodeCommandType.Create, taskParams());
       processShellResponse(response);
+      if (taskParams().targetNodeStatus != null) {
+        setNodeStatus(taskParams().targetNodeStatus);
+      }
     }
   }
 }

@@ -41,19 +41,23 @@ public class Commissioner {
 
   private final ExecutorService executor;
 
+  private final TaskExecutor taskExecutor;
+
   // A map of all task UUID's to the task runner objects for all the user tasks that are currently
   // active. Recently completed tasks are also in this list, their completion percentage should be
   // persisted before removing the task from this map.
-  private final Map<UUID, TaskRunner> runningTasks = new ConcurrentHashMap<>();
+  private final Map<UUID, TaskExecutor.TaskRunner> runningTasks = new ConcurrentHashMap<>();
 
   @Inject
   public Commissioner(
       ProgressMonitor progressMonitor,
       ApplicationLifecycle lifecycle,
-      PlatformExecutorFactory platformExecutorFactory) {
+      PlatformExecutorFactory platformExecutorFactory,
+      TaskExecutor taskExecutor) {
     ThreadFactory namedThreadFactory =
         new ThreadFactoryBuilder().setNameFormat("TaskPool-%d").build();
-    executor = platformExecutorFactory.createExecutor("commissioner", namedThreadFactory);
+    this.executor = platformExecutorFactory.createExecutor("commissioner", namedThreadFactory);
+    this.taskExecutor = taskExecutor;
     LOG.info("Started Commissioner TaskPool.");
     progressMonitor.start(runningTasks);
     LOG.info("Started TaskProgressMonitor thread.");
@@ -71,14 +75,14 @@ public class Commissioner {
       boolean claimTask = true;
 
       // Create the task runner object based on the various parameters passed in.
-      TaskRunner taskRunner = TaskRunner.createTask(taskType, taskParams, claimTask);
+      TaskExecutor.TaskRunner taskRunner = taskExecutor.createTaskRunner(taskType, taskParams);
 
       if (claimTask) {
         // Add this task to our queue.
         runningTasks.put(taskRunner.getTaskUUID(), taskRunner);
 
         // If we had claimed ownership of the task, submit it to the task threadpool.
-        executor.submit(taskRunner);
+        taskExecutor.submit(taskRunner);
       }
       return taskRunner.getTaskUUID();
     } catch (Throwable t) {
@@ -86,6 +90,11 @@ public class Commissioner {
       LOG.error(msg, t);
       throw new RuntimeException(msg, t);
     }
+  }
+
+  public boolean abort(UUID taskUUID) {
+    Optional<TaskInfo> optional = taskExecutor.stop(taskUUID, false);
+    return optional.isPresent();
   }
 
   public ObjectNode getStatusOrBadRequest(UUID taskUUID) {
@@ -158,7 +167,7 @@ public class Commissioner {
       this.executionContext = executionContext;
     }
 
-    public void start(Map<UUID, TaskRunner> runningTasks) {
+    public void start(Map<UUID, TaskExecutor.TaskRunner> runningTasks) {
       Duration checkInterval = this.progressCheckInterval();
       if (checkInterval.isZero()) {
         log.info(YB_COMMISSIONER_PROGRESS_CHECK_INTERVAL + " set to 0.");
@@ -173,13 +182,13 @@ public class Commissioner {
       }
     }
 
-    private void scheduleRunner(Map<UUID, TaskRunner> runningTasks) {
+    private void scheduleRunner(Map<UUID, TaskExecutor.TaskRunner> runningTasks) {
       // Loop through all the active tasks.
       try {
-        Iterator<Entry<UUID, TaskRunner>> iter = runningTasks.entrySet().iterator();
+        Iterator<Entry<UUID, TaskExecutor.TaskRunner>> iter = runningTasks.entrySet().iterator();
         while (iter.hasNext()) {
-          Entry<UUID, TaskRunner> entry = iter.next();
-          TaskRunner taskRunner = entry.getValue();
+          Entry<UUID, TaskExecutor.TaskRunner> entry = iter.next();
+          TaskExecutor.TaskRunner taskRunner = entry.getValue();
 
           // If the task is still running, update its latest timestamp as a part of the heartbeat.
           if (taskRunner.isTaskRunning()) {
@@ -194,7 +203,6 @@ public class Commissioner {
             iter.remove();
           }
         }
-
         // TODO: Scan the DB for tasks that have failed to make progress and claim one if possible.
       } catch (Exception e) {
         log.error("Error running commissioner progress checker", e);
