@@ -93,7 +93,7 @@ public class CustomerTaskManager {
               + "FROM task_info ti, customer_task ct "
               + "WHERE ti.uuid = ct.task_uuid "
               + "AND ct.completion_time IS NULL "
-              + "AND ti.task_state IN ('Created', 'Initializing', 'Running')";
+              + "AND ti.task_state IN ('Created', 'Initializing', 'Running', 'Abort')";
       Ebean.createSqlQuery(query)
           .findList()
           .forEach(

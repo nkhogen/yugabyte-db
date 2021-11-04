@@ -1,0 +1,79 @@
+// Copyright (c) YugaByte, Inc.
+package com.yugabyte.yw.models.helpers;
+
+import com.yugabyte.yw.models.helpers.NodeDetails.MasterState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeSubState;
+import com.yugabyte.yw.models.helpers.NodeDetails.TserverState;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.ToString;
+
+@EqualsAndHashCode
+@ToString
+@Getter
+@Builder
+public class NodeStatus {
+  private final NodeState nodeState;
+  private final NodeSubState nodeSubState;
+  private final MasterState masterState;
+  private final TserverState tserverState;
+
+  private NodeStatus(
+      NodeState nodeState,
+      NodeSubState nodeSubState,
+      MasterState masterState,
+      TserverState tserverState) {
+    this.nodeState = nodeState;
+    this.nodeSubState = nodeSubState;
+    this.masterState = masterState;
+    this.tserverState = tserverState;
+  }
+
+  public static NodeStatus fromNode(NodeDetails node) {
+    return NodeStatus.builder()
+        .nodeState(node.state)
+        .nodeSubState(node.subState)
+        .masterState(node.masterState)
+        .tserverState(node.tserverState)
+        .build();
+  }
+
+  public void fillNodeStates(NodeDetails node) {
+    if (nodeState != null) {
+      node.state = nodeState;
+    }
+    // None means override the state.
+    if (nodeSubState != null) {
+      node.subState = (nodeSubState == NodeSubState.None) ? null : nodeSubState;
+    }
+    if (masterState != null) {
+      node.masterState = (masterState == MasterState.None) ? null : masterState;
+    }
+    if (tserverState != null) {
+      node.tserverState = (tserverState == TserverState.None) ? null : tserverState;
+    }
+  }
+
+  // Compares the given state with this node status ignoring null fields of the given node status.
+  // This is useful when only some states need to be checked.
+  public boolean equalsIgnoreNull(NodeStatus nodeStatus) {
+    if (nodeStatus == null) {
+      return false;
+    }
+    if (nodeStatus.nodeState != null && nodeState != nodeStatus.nodeState) {
+      return false;
+    }
+    if (nodeStatus.nodeSubState != null && nodeSubState != nodeStatus.nodeSubState) {
+      return false;
+    }
+    if (nodeStatus.masterState != null && masterState != nodeStatus.masterState) {
+      return false;
+    }
+    if (nodeStatus.tserverState != null && tserverState != nodeStatus.tserverState) {
+      return false;
+    }
+    return true;
+  }
+}

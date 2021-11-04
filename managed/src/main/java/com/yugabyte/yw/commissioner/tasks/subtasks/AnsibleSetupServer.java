@@ -75,6 +75,9 @@ public class AnsibleSetupServer extends NodeTaskBase {
       ShellResponse response =
           getNodeManager().nodeCommand(NodeManager.NodeCommandType.Provision, taskParams());
       processShellResponse(response);
+      if (taskParams().targetNodeStatus != null) {
+        setNodeStatus(taskParams().targetNodeStatus);
+      }
     }
   }
 }

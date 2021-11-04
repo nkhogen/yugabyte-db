@@ -47,3 +47,4 @@ ui/junit.xml
 src/public/*
 
 client/*/generated
+/.apt_generated/
