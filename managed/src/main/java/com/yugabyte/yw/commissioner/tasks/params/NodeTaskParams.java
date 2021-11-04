@@ -4,10 +4,11 @@ package com.yugabyte.yw.commissioner.tasks.params;
 
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
 import com.yugabyte.yw.models.AvailabilityZone;
-import io.ebean.annotation.JsonIgnore;
+import com.yugabyte.yw.models.helpers.NodeStatus;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 public class NodeTaskParams extends UniverseDefinitionTaskParams implements INodeTaskParams {
   // The AZ in which the node should be. This can be used to find the region.
@@ -28,6 +29,8 @@ public class NodeTaskParams extends UniverseDefinitionTaskParams implements INod
   public String instanceType;
 
   public boolean useSystemd;
+
+  public NodeStatus targetNodeStatus;
 
   @JsonIgnore private AvailabilityZone zone;
 

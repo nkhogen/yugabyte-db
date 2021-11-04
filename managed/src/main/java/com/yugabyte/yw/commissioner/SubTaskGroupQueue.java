@@ -2,20 +2,28 @@
 
 package com.yugabyte.yw.commissioner;
 
+import com.google.api.client.util.Throwables;
 import com.yugabyte.yw.models.TaskInfo;
+
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@Slf4j
 public class SubTaskGroupQueue {
 
   public static final Logger LOG = LoggerFactory.getLogger(SubTaskGroupQueue.class);
 
-  // The list of tasks lists in this task list sequence.
-  CopyOnWriteArrayList<SubTaskGroup> subTaskGroups = new CopyOnWriteArrayList<SubTaskGroup>();
+  // TODO unused field to be removed.
+  private final UUID userTaskUUID;
 
-  private UUID userTaskUUID;
+  // The list of tasks lists in this task list sequence.
+  private final CopyOnWriteArrayList<SubTaskGroup> subTaskGroups =
+      new CopyOnWriteArrayList<SubTaskGroup>();
 
   public SubTaskGroupQueue(UUID userTaskUUID) {
     this.userTaskUUID = userTaskUUID;
@@ -23,47 +31,41 @@ public class SubTaskGroupQueue {
 
   /** Add a task list to this sequence. */
   public boolean add(SubTaskGroup subTaskGroup) {
-    subTaskGroup.setTaskContext(subTaskGroups.size(), userTaskUUID);
+    log.info("Adding subTaskGroup #{}: {}", subTaskGroups.size(), subTaskGroup.getName());
     return subTaskGroups.add(subTaskGroup);
   }
 
   /** Execute the sequence of task lists in a sequential manner. */
   public void run() {
-    boolean runSuccess = true;
-    for (SubTaskGroup subTaskGroup : subTaskGroups) {
-      boolean subTaskGroupSuccess = false;
-      subTaskGroup.setUserSubTaskState(TaskInfo.State.Running);
-      try {
-        subTaskGroup.run();
-        subTaskGroupSuccess = subTaskGroup.waitFor();
-      } catch (Throwable t) {
-        // Update task state to failure
-        subTaskGroup.setUserSubTaskState(TaskInfo.State.Failure);
-        if (!subTaskGroup.ignoreErrors) {
-          throw t;
+    try {
+      RuntimeException anyEx = null;
+      for (SubTaskGroup subTaskGroup : subTaskGroups) {
+        RuntimeException re = null;
+        try {
+          subTaskGroup.run();
+          subTaskGroup.waitFor();
+        } catch (RuntimeException e) {
+          re = e;
+          anyEx = re;
+        }
+        if (re != null && !subTaskGroup.ignoreErrors) {
+          LOG.error("SubTaskGroup '{}' waitFor() returned failed status.", subTaskGroup.toString());
+          if (!subTaskGroup.ignoreErrors) {
+            if (re instanceof CancellationException) {
+              throw new CancellationException(subTaskGroup.toString() + " is cancelled.");
+            }
+            throw new RuntimeException(subTaskGroup.toString() + " failed.");
+          }
         }
       }
-
-      if (!subTaskGroupSuccess) {
-        LOG.error("SubTaskGroup '{}' waitFor() returned failed status.", subTaskGroup.toString());
-        subTaskGroup.setUserSubTaskState(TaskInfo.State.Failure);
-        if (!subTaskGroup.ignoreErrors) {
-          throw new RuntimeException(subTaskGroup.toString() + " failed.");
+      if (anyEx != null) {
+        if (anyEx instanceof CancellationException) {
+          throw new CancellationException("SubTask is cancelled.");
         }
+        throw new RuntimeException("One or more subTaskGroups failed while running.");
       }
-
-      runSuccess = runSuccess && subTaskGroupSuccess;
-
-      if (subTaskGroupSuccess) subTaskGroup.setUserSubTaskState(TaskInfo.State.Success);
-    }
-
-    if (!runSuccess) throw new RuntimeException("One or more subTaskGroups failed while running.");
-  }
-
-  /** Cleans up the resources held by the subtasks in the groups */
-  public void cleanup() {
-    for (SubTaskGroup subTaskGroup : subTaskGroups) {
-      subTaskGroup.cleanup();
+    } finally {
+      subTaskGroups.clear();
     }
   }
 }

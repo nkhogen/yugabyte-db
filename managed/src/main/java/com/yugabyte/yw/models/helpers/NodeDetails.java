@@ -113,9 +113,49 @@ public class NodeDetails {
     }
   }
 
+  public enum NodeSubState {
+    // TODO add more relevant states.
+    None,
+    InstanceCreated,
+    ServerSetup,
+    ServerConfigured
+  }
+
+  public enum MasterState {
+    // TODO add more relevant states.
+    None,
+    Stopped,
+    Started,
+    Running,
+    Joined,
+    Unjoined
+  }
+
+  public enum TserverState {
+    // TODO add more relevant states.
+    None,
+    Stopped,
+    Started,
+    Running,
+    Joined,
+    Unjoined
+  }
+
   // The current state of the node.
   @ApiModelProperty(value = "Node state", example = "Provisioned")
   public NodeState state;
+
+  // The current sub-state in the state of the node.
+  @ApiModelProperty(value = "Node substate", example = "InstanceCreated")
+  public NodeSubState subState;
+
+  // The current sub-state in the state of the node.
+  @ApiModelProperty(value = "Master state", example = "Started")
+  public MasterState masterState;
+
+  // The current sub-state in the state of the node.
+  @ApiModelProperty(value = "Tserver state", example = "Started")
+  public TserverState tserverState;
 
   // True if this node is a master, along with port info.
   @ApiModelProperty(value = "True if this node is a master")

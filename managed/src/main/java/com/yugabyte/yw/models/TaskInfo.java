@@ -68,6 +68,12 @@ public class TaskInfo extends Model {
 
     @EnumValue("Unknown")
     Unknown,
+
+    @EnumValue("Aborting")
+    Aborting,
+
+    @EnumValue("Aborted")
+    Aborted
   }
 
   // The task UUID.

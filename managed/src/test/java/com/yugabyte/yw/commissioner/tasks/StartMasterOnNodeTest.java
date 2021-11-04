@@ -7,6 +7,10 @@ import static com.yugabyte.yw.common.ModelFactory.createUniverse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -32,6 +36,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.yb.client.YBClient;
+
 import play.libs.Json;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -65,6 +71,14 @@ public class StartMasterOnNodeTest extends CommissionerBaseTest {
     dummyShellResponse = new ShellResponse();
     dummyShellResponse.message = "true";
     when(mockNodeManager.nodeCommand(any(), any())).thenReturn(dummyShellResponse);
+    YBClient mockClient = mock(YBClient.class);
+    when(mockYBClient.getClient(any(), any())).thenReturn(mockClient);
+    when(mockYBClient.getClientWithConfig(any())).thenReturn(mockClient);
+    when(mockClient.waitForServer(any(), anyLong())).thenReturn(true);
+    try {
+      when(mockClient.setFlag(any(), anyString(), anyString(), anyBoolean())).thenReturn(true);
+    } catch (Exception e) {
+    }
   }
 
   private TaskInfo submitTask(NodeTaskParams taskParams, String nodeName) {
@@ -138,7 +152,10 @@ public class StartMasterOnNodeTest extends CommissionerBaseTest {
     NodeTaskParams taskParams = new NodeTaskParams();
     taskParams.universeUUID = universe.universeUUID;
     TaskInfo taskInfo = submitTask(taskParams, "host-n2");
-    verify(mockNodeManager, times(3)).nodeCommand(any(), any());
+    // Node commands are run on existing three Tservers too in createMasterInfoUpdateTask.
+    // Total there are 8 calls - instanceExists (1), createConfigureServerTasks (1)
+    // createStartMasterTasks (1), createMasterInfoUpdateTask (5).
+    verify(mockNodeManager, times(8)).nodeCommand(any(), any());
     List<TaskInfo> subTasks = taskInfo.getSubTasks();
     Map<Integer, List<TaskInfo>> subTasksByPosition =
         subTasks.stream().collect(Collectors.groupingBy(TaskInfo::getPosition));

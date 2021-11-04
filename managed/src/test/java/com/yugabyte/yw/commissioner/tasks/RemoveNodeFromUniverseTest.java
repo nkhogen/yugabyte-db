@@ -33,6 +33,8 @@ import java.util.stream.Collectors;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.yb.client.ChangeMasterClusterConfigResponse;
+import org.yb.client.GetLoadMovePercentResponse;
 import org.yb.client.YBClient;
 import play.libs.Json;
 
@@ -91,14 +93,21 @@ public class RemoveNodeFromUniverseTest extends CommissionerBaseTest {
     dummyShellResponse.message = "true";
     when(mockNodeManager.nodeCommand(any(), any())).thenReturn(dummyShellResponse);
     when(mockClient.waitForServer(any(), anyLong())).thenReturn(true);
+    GetLoadMovePercentResponse movePercentResponse = mock(GetLoadMovePercentResponse.class);
+    when(movePercentResponse.getPercentCompleted()).thenReturn(100.0);
 
     try {
+      when(mockClient.getLoadMoveCompletion()).thenReturn(movePercentResponse);
+      // The calls are in ModifyUniverseConfig.doCall() in UpdatePlacementInfo.
+      when(mockClient.changeMasterClusterConfig(any()))
+          .thenReturn(mock(ChangeMasterClusterConfigResponse.class));
       // WaitForTServerHeartBeats mock.
       doNothing().when(mockClient).waitForMasterLeader(anyLong());
     } catch (Exception e) {
     }
 
     when(mockYBClient.getClient(any(), any())).thenReturn(mockClient);
+    when(mockYBClient.getClientWithConfig(any())).thenReturn(mockClient);
     mockWaits(mockClient, 3);
   }
 

@@ -254,7 +254,17 @@ public enum TaskType {
 
   ResetUniverseVersion("subtasks.ResetUniverseVersion"),
 
-  DeleteCertificate("subtasks.DeleteCertificate");
+  DeleteCertificate("subtasks.DeleteCertificate"),
+
+  CheckMasterLeader("subtasks.check.CheckMasterLeader"),
+
+  CheckMasters("subtasks.check.CheckMasters"),
+
+  CheckTServers("subtasks.check.CheckTServers"),
+
+  WaitForTServerHBs("subtasks.check.WaitForTServerHBs"),
+
+  CreatePrometheusSwamperConfig("subtasks.CreatePrometheusSwamperConfig");
 
   private String relativeClassPath;
 
