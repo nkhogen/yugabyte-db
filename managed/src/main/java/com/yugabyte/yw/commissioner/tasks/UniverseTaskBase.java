@@ -3,6 +3,7 @@
 package com.yugabyte.yw.commissioner.tasks;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.google.api.client.util.Objects;
 import com.google.common.net.HostAndPort;
 import com.yugabyte.yw.commissioner.AbstractTaskBase;
 import com.yugabyte.yw.commissioner.BaseTaskDependencies;
@@ -75,8 +76,13 @@ import com.yugabyte.yw.models.TaskInfo;
 import com.yugabyte.yw.models.Universe;
 import com.yugabyte.yw.models.Universe.UniverseUpdater;
 import com.yugabyte.yw.models.helpers.NodeDetails;
+import com.yugabyte.yw.models.helpers.NodeStatus;
 import com.yugabyte.yw.models.helpers.TableDetails;
 import com.yugabyte.yw.models.helpers.TaskType;
+import com.yugabyte.yw.models.helpers.NodeDetails.MasterState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeSubState;
+
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
@@ -88,6 +94,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
+
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -172,6 +180,16 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
       boolean checkSuccess,
       boolean isForceUpdate,
       boolean isResumeOrDelete) {
+    return getLockingUniverseUpdater(
+        expectedUniverseVersion, checkSuccess, isForceUpdate, isResumeOrDelete, null);
+  }
+
+  private UniverseUpdater getLockingUniverseUpdater(
+      int expectedUniverseVersion,
+      boolean checkSuccess,
+      boolean isForceUpdate,
+      boolean isResumeOrDelete,
+      Consumer<Universe> callback) {
     TaskType owner = taskClassnameToTaskTypeMap.get(this.getClass().getCanonicalName());
     if (owner == null) {
       log.trace("TaskType not found for class " + this.getClass().getCanonicalName());
@@ -192,7 +210,19 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
           log.error(msg);
           throw new RuntimeException(msg);
         }
+        // If the task is retried, check if the task UUID is same as the one in the universe.
+        if (!isForceUpdate
+            && UniverseTaskBase.this.isRetryable()
+            && StringUtils.isNotBlank(universeDetails.errorString)
+            && !Objects.equal(taskParams().previousTaskUUID, universeDetails.updatingTaskUUID)) {
+          String msg = "Universe " + taskParams().universeUUID + " is already in error state.";
+          log.error(msg);
+          throw new RuntimeException(msg);
+        }
         markUniverseUpdateInProgress(owner, universe, checkSuccess);
+        if (callback != null) {
+          callback.accept(universe);
+        }
       }
     };
   }
@@ -203,6 +233,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     // Persist the updated information about the universe. Mark it as being edited.
     universeDetails.updateInProgress = true;
     universeDetails.updatingTask = owner;
+    universeDetails.updatingTaskUUID = userTaskUUID;
     if (checkSuccess) {
       universeDetails.updateSucceeded = false;
     }
@@ -343,6 +374,22 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
    *
    * @param expectedUniverseVersion Lock only if the current version of the universe is at this
    *     version. -1 implies always lock the universe.
+   * @param callback Callback is invoked for any pre-processing to be done on the Universe before it
+   *     is saved in transaction with 'updateInProgress' flag.
+   * @return
+   */
+  public Universe lockUniverseForUpdate(int expectedUniverseVersion, Consumer<Universe> callback) {
+    UniverseUpdater updater =
+        getLockingUniverseUpdater(expectedUniverseVersion, true, false, false, callback);
+    return lockUniverseForUpdate(expectedUniverseVersion, updater);
+  }
+
+  /**
+   * Locks the universe for updates by setting the 'updateInProgress' flag. If the universe is
+   * already being modified, then throws an exception.
+   *
+   * @param expectedUniverseVersion Lock only if the current version of the universe is at this
+   *     version. -1 implies always lock the universe.
    */
   public Universe lockUniverseForUpdate(int expectedUniverseVersion) {
     UniverseUpdater updater =
@@ -415,6 +462,10 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
             universeDetails.updateInProgress = false;
             universeDetails.updatingTask = null;
             universeDetails.errorString = err;
+            if (err == null) {
+              // If error is set, keep reference to the failed task ID.
+              universeDetails.updatingTaskUUID = null;
+            }
             universe.setUniverseDetails(universeDetails);
           }
         };
@@ -1498,7 +1549,11 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
   // Helper API to update the db for the node with the given state.
   public void setNodeState(String nodeName, NodeDetails.NodeState state) {
     // Persist the desired node information into the DB.
-    UniverseUpdater updater = nodeStateUpdater(taskParams().universeUUID, nodeName, state);
+    UniverseUpdater updater =
+        nodeStateUpdater(
+            taskParams().universeUUID,
+            nodeName,
+            new NodeStatus.NodeStatusBuilder().setNodeState(state).build());
     saveUniverseDetails(updater);
   }
 

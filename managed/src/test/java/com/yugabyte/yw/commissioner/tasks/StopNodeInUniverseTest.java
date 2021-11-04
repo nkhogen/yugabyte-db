@@ -7,6 +7,7 @@ import static com.yugabyte.yw.common.ModelFactory.createUniverse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,6 +34,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.yb.client.YBClient;
+
 import play.libs.Json;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -62,6 +65,8 @@ public class StopNodeInUniverseTest extends CommissionerBaseTest {
     dummyShellResponse = new ShellResponse();
     dummyShellResponse.message = "true";
     when(mockNodeManager.nodeCommand(any(), any())).thenReturn(dummyShellResponse);
+    YBClient mockClient = mock(YBClient.class);
+    when(mockYBClient.getClient(any(), any())).thenReturn(mockClient);
   }
 
   private TaskInfo submitTask(NodeTaskParams taskParams, String nodeName) {

@@ -5,8 +5,11 @@ import com.google.inject.Provides;
 import com.yugabyte.yw.cloud.AWSInitializer;
 import com.yugabyte.yw.cloud.aws.AWSCloudModule;
 import com.yugabyte.yw.commissioner.CallHome;
+import com.yugabyte.yw.commissioner.DefaultExecutorServiceProvider;
+import com.yugabyte.yw.commissioner.ExecutorServiceProvider;
 import com.yugabyte.yw.commissioner.HealthChecker;
 import com.yugabyte.yw.commissioner.SetUniverseKey;
+import com.yugabyte.yw.commissioner.TaskExecutor;
 import com.yugabyte.yw.commissioner.TaskGarbageCollector;
 import com.yugabyte.yw.common.AccessManager;
 import com.yugabyte.yw.common.AlertManager;
@@ -116,6 +119,8 @@ public class Module extends AbstractModule {
       bind(PlatformReplicationManager.class).asEagerSingleton();
       bind(PlatformInstanceClientFactory.class).asEagerSingleton();
       bind(PlatformReplicationHelper.class).asEagerSingleton();
+      bind(ExecutorServiceProvider.class).to(DefaultExecutorServiceProvider.class);
+      bind(TaskExecutor.class).asEagerSingleton();
 
       final CallbackController callbackController = new CallbackController();
       callbackController.setDefaultUrl(config.getString("yb.url", ""));
