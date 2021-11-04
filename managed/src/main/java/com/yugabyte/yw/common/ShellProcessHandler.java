@@ -10,6 +10,9 @@
 
 package com.yugabyte.yw.common;
 
+import static com.yugabyte.yw.common.ShellResponse.ERROR_CODE_EXECUTION_CANCELLED;
+import static com.yugabyte.yw.common.ShellResponse.ERROR_CODE_GENERIC_ERROR;
+import static com.yugabyte.yw.common.ShellResponse.ERROR_CODE_SUCCESS;
 import com.google.common.base.Joiner;
 import com.google.inject.Inject;
 import java.io.BufferedReader;
@@ -80,7 +83,7 @@ public class ShellProcessHandler {
     }
 
     ShellResponse response = new ShellResponse();
-    response.code = -1;
+    response.code = ERROR_CODE_GENERIC_ERROR;
     if (description == null) {
       response.setDescription(command);
     } else {
@@ -161,7 +164,9 @@ public class ShellProcessHandler {
 
         response.code = process.exitValue();
         response.message =
-            (response.code == 0) ? processOutput.toString().trim() : processError.toString().trim();
+            (response.code == ERROR_CODE_SUCCESS)
+                ? processOutput.toString().trim()
+                : processError.toString().trim();
         String ansibleErrMsg =
             getAnsibleErrMsg(response.code, processOutput.toString(), processError.toString());
         if (ansibleErrMsg != null) {
@@ -169,7 +174,10 @@ public class ShellProcessHandler {
         }
       }
     } catch (IOException | InterruptedException e) {
-      response.code = -1;
+      response.code = ERROR_CODE_GENERIC_ERROR;
+      if (e instanceof InterruptedException) {
+        response.code = ERROR_CODE_EXECUTION_CANCELLED;
+      }
       LOG.error("Exception running command '{}'", response.description, e);
       response.message = e.getMessage();
       // Send a kill signal to ensure process is cleaned up in case of any failure.
@@ -181,7 +189,9 @@ public class ShellProcessHandler {
         response.durationMs = System.currentTimeMillis() - startMs;
       }
       String status =
-          (0 == response.code) ? "success" : ("failure code=" + Integer.toString(response.code));
+          (ERROR_CODE_SUCCESS == response.code)
+              ? "success"
+              : ("failure code=" + Integer.toString(response.code));
       LOG.info(
           "Completed proc '{}' status={} [ {} ms ]",
           response.description,
@@ -244,7 +254,7 @@ public class ShellProcessHandler {
 
   private static String getAnsibleErrMsg(int code, String stdout, String stderr) {
 
-    if (stderr == null || code == 0) return null;
+    if (stderr == null || code == ERROR_CODE_SUCCESS) return null;
 
     String result = null;
 

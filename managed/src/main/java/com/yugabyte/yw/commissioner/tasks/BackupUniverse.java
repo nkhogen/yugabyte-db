@@ -253,4 +253,9 @@ public class BackupUniverse extends UniverseTaskBase {
     metricService.setOkStatusMetric(
         buildMetricTemplate(PlatformMetrics.SCHEDULE_BACKUP_STATUS, universe));
   }
+
+  @Override
+  public boolean isAbortable() {
+    return true;
+  }
 }

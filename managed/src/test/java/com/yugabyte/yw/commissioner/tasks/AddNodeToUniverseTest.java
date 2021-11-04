@@ -337,6 +337,10 @@ public class AddNodeToUniverseTest extends UniverseModifyBaseTest {
     assertAddNodeSequence(subTasksByPosition, true /* Master start is expected */);
   }
 
+  // As the node (yb-tserver-0) is not in the primary cluster,
+  // it will not be considered for master process.
+  // But, waitForServer on this Tserver requires a masterAddress to be present.
+  // So, a master needs to be present.
   @Test
   public void testAddNodeWithUnderReplicatedMaster_WithReadOnlyCluster_NodeFromReadReplica() {
     Universe universe = createUniverse("Demo");

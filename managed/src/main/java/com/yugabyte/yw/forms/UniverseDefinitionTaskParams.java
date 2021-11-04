@@ -20,6 +20,7 @@ import com.yugabyte.yw.commissioner.tasks.UniverseDefinitionTaskBase;
 import com.yugabyte.yw.common.PlatformServiceException;
 import com.yugabyte.yw.models.Provider;
 import com.yugabyte.yw.models.Region;
+import com.yugabyte.yw.models.Universe.UniverseState;
 import com.yugabyte.yw.models.helpers.DeviceInfo;
 import com.yugabyte.yw.models.helpers.NodeDetails;
 import com.yugabyte.yw.models.helpers.PlacementInfo;
@@ -101,6 +102,9 @@ public class UniverseDefinitionTaskParams extends UniverseTaskParams {
   // Type of task which set updateInProgress flag.
   @ApiModelProperty public TaskType updatingTask = null;
 
+  // Type of task which set updateInProgress flag.
+  @ApiModelProperty public UUID updatingTaskUUID = null;
+
   @ApiModelProperty public boolean backupInProgress = false;
 
   // This tracks the if latest operation on this universe has successfully completed. This flag is
@@ -129,6 +133,9 @@ public class UniverseDefinitionTaskParams extends UniverseTaskParams {
   @ApiModelProperty public String itestS3PackagePath = "";
 
   @ApiModelProperty public String remotePackagePath = "";
+
+  // State of the universe during update.
+  @ApiModelProperty public UniverseState state;
 
   /** Allowed states for an imported universe. */
   public enum ImportedState {
