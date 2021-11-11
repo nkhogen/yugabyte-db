@@ -48,22 +48,35 @@ public class CreateUniverse extends UniverseDefinitionTaskBase {
   public void run() {
     log.info("Started {} task.", getName());
     try {
-      // Verify the task params.
-      verifyParams(UniverseOpType.CREATE);
+      if (taskParams().previousTaskUUID == null) {
+        // Verify the task params.
+        verifyParams(UniverseOpType.CREATE);
+      }
 
       // Create the task list sequence.
       subTaskGroupQueue = new SubTaskGroupQueue(userTaskUUID);
 
       // Update the universe DB with the update to be performed and set the 'updateInProgress' flag
       // to prevent other updates from happening.
-      Universe universe = lockUniverseForUpdate(taskParams().expectedUniverseVersion);
+      Universe universe =
+          lockUniverseForUpdate(
+              taskParams().expectedUniverseVersion,
+              u -> {
+                if (taskParams().previousTaskUUID == null) {
+                  // Set all the in-memory node names.
+                  setNodeNames(u);
+                  updateOnPremNodeUuids(u);
+                  // Select master nodes.
+                  selectMasters();
+                  // TODO Update is not in transaction.
+                  setUserIntentToUniverse(u, false);
+                  // Save the changes to the task.
+                  getTaskExecutor().updateTask(this);
+                }
+              });
 
-      // Set all the in-memory node names.
-      setNodeNames(universe);
-
-      // Select master nodes.
-      selectMasters();
-
+      populateTaskParams(universe);
+      // TODO
       if (taskParams().getPrimaryCluster().userIntent.enableYCQL
           && taskParams().getPrimaryCluster().userIntent.enableYCQLAuth) {
         ycqlPassword = taskParams().getPrimaryCluster().userIntent.ycqlPassword;
@@ -75,38 +88,37 @@ public class CreateUniverse extends UniverseDefinitionTaskBase {
         taskParams().getPrimaryCluster().userIntent.ysqlPassword = Util.redactString(ysqlPassword);
       }
 
-      if (taskParams().firstTry) {
-        // Update the user intent.
-        universe = writeUserIntentToUniverse();
-        updateOnPremNodeUuids(universe);
-      }
-
       // Update the universe to the latest state and
       // check if the nodes already exist in the cloud provider, if so,
       // fail the universe creation.
       universe = Universe.getOrBadRequest(universe.universeUUID);
+      // TODO
+      // if (taskParams().firstTry) {
       checkIfNodesExist(universe);
+      // }
       Cluster primaryCluster = taskParams().getPrimaryCluster();
 
       performUniversePreflightChecks(universe.getUniverseDetails().clusters);
 
-      // Create the required number of nodes in the appropriate locations.
-      createCreateServerTasks(taskParams().nodeDetailsSet)
-          .setSubTaskGroupType(SubTaskGroupType.Provisioning);
-
-      // Get all information about the nodes of the cluster. This includes the public ip address,
-      // the private ip address (in the case of AWS), etc.
-      createServerInfoTasks(taskParams().nodeDetailsSet)
-          .setSubTaskGroupType(SubTaskGroupType.Provisioning);
-
-      // Provision the required number of nodes in the appropriate locations.
-      // force reuse host since part of create universe flow
-      createSetupServerTasks(taskParams().nodeDetailsSet)
-          .setSubTaskGroupType(SubTaskGroupType.Provisioning);
-
-      // Configures and deploys software on all the nodes (masters and tservers).
-      createConfigureServerTasks(taskParams().nodeDetailsSet, false /* isShell */)
-          .setSubTaskGroupType(SubTaskGroupType.InstallingSoftware);
+      provisionNodes(universe, primaryCluster, taskParams().nodeDetailsSet);
+      //      // Create the required number of nodes in the appropriate locations.
+      //      createCreateServerTasks(taskParams().nodeDetailsSet)
+      //          .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+      //
+      //      // Get all information about the nodes of the cluster. This includes the public ip
+      // address,
+      //      // the private ip address (in the case of AWS), etc.
+      //      createServerInfoTasks(taskParams().nodeDetailsSet)
+      //          .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+      //
+      //      // Provision the required number of nodes in the appropriate locations.
+      //      // force reuse host since part of create universe flow
+      //      createSetupServerTasks(taskParams().nodeDetailsSet)
+      //          .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+      //
+      //      // Configures and deploys software on all the nodes (masters and tservers).
+      //      createConfigureServerTasks(taskParams().nodeDetailsSet, false /* isShell */)
+      //          .setSubTaskGroupType(SubTaskGroupType.InstallingSoftware);
 
       Set<NodeDetails> primaryNodes = taskParams().getNodesInCluster(primaryCluster.uuid);
       // Override master flags (on primary cluster) and tserver flags as necessary.

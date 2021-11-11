@@ -3,6 +3,7 @@
 package com.yugabyte.yw.commissioner;
 
 import static com.yugabyte.yw.models.helpers.CommonUtils.getDurationSeconds;
+import static play.mvc.Http.Status.BAD_REQUEST;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -42,6 +43,7 @@ import com.google.api.client.util.Throwables;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import com.yugabyte.yw.commissioner.UserTaskDetails.SubTaskGroupType;
+import com.yugabyte.yw.common.PlatformServiceException;
 import com.yugabyte.yw.common.ha.PlatformReplicationManager;
 import com.yugabyte.yw.common.password.RedactingService;
 import com.yugabyte.yw.forms.ITaskParams;
@@ -190,9 +192,18 @@ public class TaskExecutor {
     this.replicationManager = replicationManager;
   }
 
+  // Returns the class of the task for the given task type.
+  public static Class<? extends ITask> getTaskClass(TaskType taskType) {
+    Class<? extends ITask> taskClass = taskTypeToTaskClassMap.get(taskType);
+    if (taskClass == null) {
+      throw new PlatformServiceException(BAD_REQUEST, "Invalid task type: " + taskType);
+    }
+    return taskClass;
+  }
+
   // Create a task runner for a task type and params.
   public TaskRunner createTaskRunner(TaskType taskType, ITaskParams taskParams) {
-    ITask task = Play.current().injector().instanceOf(taskTypeToTaskClassMap.get(taskType));
+    ITask task = Play.current().injector().instanceOf(getTaskClass(taskType));
     task.initialize(taskParams);
     TaskInfo taskInfo = createTaskInfo(task);
     taskInfo.setPosition(taskInitialPosition);
@@ -339,6 +350,18 @@ public class TaskExecutor {
     for (SubTaskRunner taskRunner : taskContext.subTaskRunners) {
       taskRunner.setTaskState(userTaskState);
     }
+  }
+
+  // Update a running task.
+  public void updateTask(ITask task) {
+    log.info("UpdateTask called for {}", task);
+    Optional<TaskContext> optional = getCurrentTaskContext();
+    if (!optional.isPresent()) {
+      throw new IllegalStateException("updateTask must be called from the task run method");
+    }
+    TaskContext taskContext = optional.get();
+    taskContext.taskRunner.setTaskDetails(
+        RedactingService.filterSecretFields(task.getTaskDetails()));
   }
 
   // Submit a subtask task for asynchronous execution
@@ -681,6 +704,11 @@ public class TaskExecutor {
 
     public synchronized void setTaskState(TaskInfo.State state) {
       taskInfo.setTaskState(state);
+      taskInfo.save();
+    }
+
+    public synchronized void setTaskDetails(JsonNode taskDetails) {
+      taskInfo.setTaskDetails(taskDetails);
       taskInfo.save();
     }
 

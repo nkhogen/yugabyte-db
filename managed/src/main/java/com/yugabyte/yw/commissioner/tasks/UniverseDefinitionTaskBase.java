@@ -7,6 +7,7 @@ import com.yugabyte.yw.commissioner.BaseTaskDependencies;
 import com.yugabyte.yw.commissioner.Common.CloudType;
 import com.yugabyte.yw.commissioner.SubTaskGroup;
 import com.yugabyte.yw.commissioner.UserTaskDetails.SubTaskGroupType;
+import com.yugabyte.yw.commissioner.tasks.UniverseDefinitionTaskBase.ServerType;
 import com.yugabyte.yw.commissioner.tasks.params.NodeTaskParams;
 import com.yugabyte.yw.commissioner.tasks.subtasks.AnsibleClusterServerCtl;
 import com.yugabyte.yw.commissioner.tasks.subtasks.AnsibleConfigureServers;
@@ -34,8 +35,18 @@ import com.yugabyte.yw.models.Universe;
 import com.yugabyte.yw.models.Universe.UniverseUpdater;
 import com.yugabyte.yw.models.helpers.CloudSpecificInfo;
 import com.yugabyte.yw.models.helpers.NodeDetails;
+import com.yugabyte.yw.models.helpers.NodeDetails.MasterState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeSubState;
+import com.yugabyte.yw.models.helpers.NodeDetails.TserverState;
+import com.yugabyte.yw.models.helpers.NodeStatus;
+import com.yugabyte.yw.models.helpers.NodeStatus.NodeStatusBuilder;
+
+import akka.stream.impl.fusing.Log;
+
 import com.yugabyte.yw.models.helpers.PlacementInfo;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -43,12 +54,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import play.Configuration;
 
@@ -322,6 +337,22 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     return newName;
   }
 
+  public void populateTaskParams(Universe universe) {
+    for (Cluster cluster : taskParams().clusters) {
+      Map<UUID, NodeDetails> nodesMap =
+          universe
+              .getNodesInCluster(cluster.uuid)
+              .stream()
+              .collect(Collectors.toMap(NodeDetails::getNodeUUID, Function.identity()));
+      for (NodeDetails node : taskParams().getNodesInCluster(cluster.uuid)) {
+        NodeDetails nodeInUniverse = nodesMap.get(node.nodeUuid);
+        node.nodeIdx = nodeInUniverse.nodeIdx;
+        node.nodeName = nodeInUniverse.nodeName;
+        node.isMaster = nodeInUniverse.isMaster;
+      }
+    }
+  }
+
   // Set the universes' node prefix for universe creation op. And node names/indices of all the
   // being added nodes.
   public void setNodeNames(Universe universe) {
@@ -361,6 +392,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
           if (node.nodeName != null) {
             throw new IllegalStateException("Node name " + node.nodeName + " cannot be preset.");
           }
+          node.nodeUuid = UUID.randomUUID();
           node.nodeIdx = startIndex + iter;
           node.nodeName =
               getNodeName(
@@ -604,6 +636,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    * @param nodes : a collection of nodes that need to be created
    */
   public SubTaskGroup createStartTServersTasks(Collection<NodeDetails> nodes) {
+    NodeStatus targetNodeStatus =
+        new NodeStatusBuilder().setTServerState(TserverState.Started).build();
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleClusterServerCtl", executor);
     for (NodeDetails node : nodes) {
       AnsibleClusterServerCtl.Params params = new AnsibleClusterServerCtl.Params();
@@ -621,6 +655,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       // Set the InstanceType
       params.instanceType = node.cloudInfo.instance_type;
       params.useSystemd = userIntent.useSystemd;
+      params.targetNodeStatus = targetNodeStatus;
       // Create the Ansible task to get the server info.
       AnsibleClusterServerCtl task = createTask(AnsibleClusterServerCtl.class);
       task.initialize(params);
@@ -735,6 +770,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     params.machineImage = node.machineImage;
     params.cmkArn = taskParams().cmkArn;
     params.ipArnString = userIntent.awsArnString;
+    params.nodeUuid = node.nodeUuid;
   }
 
   /**
@@ -744,6 +780,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    */
   public SubTaskGroup createSetupServerTasks(
       Collection<NodeDetails> nodes, boolean isSystemdUpgrade) {
+    NodeStatus targetNodeStatus =
+        new NodeStatusBuilder().setNodeSubState(NodeSubState.ServerSetup).build();
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleSetupServer", executor);
     for (NodeDetails node : nodes) {
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
@@ -751,6 +789,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       fillSetupParamsForNode(params, userIntent, node);
       params.useSystemd = userIntent.useSystemd;
       params.isSystemdUpgrade = isSystemdUpgrade;
+      params.targetNodeStatus = targetNodeStatus;
 
       // Create the Ansible task to setup the server.
       AnsibleSetupServer ansibleSetupServer = createTask(AnsibleSetupServer.class);
@@ -777,7 +816,6 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
       AnsibleCreateServer.Params params = new AnsibleCreateServer.Params();
       fillCreateParamsForNode(params, userIntent, node);
-
       // Create the Ansible task to setup the server.
       AnsibleCreateServer ansibleCreateServer = createTask(AnsibleCreateServer.class);
       ansibleCreateServer.initialize(params);
@@ -866,7 +904,6 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
 
       // Development testing variable.
       params.itestS3PackagePath = taskParams().itestS3PackagePath;
-
       Universe universe = Universe.getOrBadRequest(taskParams().universeUUID);
       UUID custUUID = Customer.get(universe.customerId).uuid;
 
@@ -901,7 +938,6 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    */
   public SubTaskGroup createServerInfoTasks(Collection<NodeDetails> nodes) {
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleUpdateNodeInfo", executor);
-
     for (NodeDetails node : nodes) {
       NodeTaskParams params = new NodeTaskParams();
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
@@ -1057,5 +1093,138 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       createFailedPrecheckTask(failedNodes).setSubTaskGroupType(SubTaskGroupType.PreflightChecks);
     }
     return failedNodes.isEmpty();
+  }
+
+  // Nodes are filtered by the states and passed to the consumer for immediate execution.
+  protected boolean filterNodesByStatus(
+      Universe universe,
+      Set<NodeDetails> nodes,
+      boolean skipNodeStatusCheck,
+      NodeStatus nodeStatus,
+      Consumer<Set<NodeDetails>> consumer) {
+    boolean isSkipNodeStatusCheck = skipNodeStatusCheck;
+    Map<String, NodeDetails> nodesMap =
+        universe
+            .getUniverseDetails()
+            .nodeDetailsSet
+            .stream()
+            .collect(Collectors.toMap(NodeDetails::getNodeName, Function.identity()));
+    Set<NodeDetails> filteredNodes =
+        nodes
+            .stream()
+            .map(node -> nodesMap.get(node.getNodeName()))
+            .filter(
+                node -> {
+                  NodeStatus currentNodeStatus = NodeStatus.fromNode(node);
+                  log.info(
+                      "Expected node status {}, found {} for node {}",
+                      nodeStatus,
+                      currentNodeStatus,
+                      node.getNodeName());
+                  return skipNodeStatusCheck || nodeStatus.equals(currentNodeStatus);
+                })
+            .collect(Collectors.toSet());
+    if (CollectionUtils.isNotEmpty(filteredNodes)) {
+      consumer.accept(filteredNodes);
+      isSkipNodeStatusCheck = true;
+    }
+    return isSkipNodeStatusCheck;
+  }
+
+  /**
+   * Provisions the set of nodes.
+   *
+   * @param cluster the cluster to which the nodes belong.
+   * @param nodesToProvision the nodes to be provisioned.
+   */
+  public void provisionNodes(
+      Universe universe, Cluster cluster, Set<NodeDetails> nodesToProvision) {
+    boolean skipNodeStatusCheck = false;
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            new NodeStatusBuilder().setNodeState(NodeState.ToBeAdded).build(),
+            filteredNodes -> {
+              createSetNodeStatusTasks(
+                      filteredNodes, new NodeStatusBuilder().setNodeState(NodeState.Adding).build())
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            new NodeStatusBuilder().setNodeState(NodeState.Adding).build(),
+            filteredNodes -> {
+              createCreateServerTasks(filteredNodes)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            new NodeStatus.NodeStatusBuilder()
+                .setNodeState(NodeState.Adding)
+                .setNodeSubState(NodeSubState.InstanceCreated)
+                .build(),
+            filteredNodes -> {
+              createServerInfoTasks(filteredNodes)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            new NodeStatus.NodeStatusBuilder()
+                .setNodeState(NodeState.Provisioned)
+                .setNodeSubState(NodeSubState.InstanceCreated)
+                .build(),
+            filteredNodes -> {
+              createSetupServerTasks(filteredNodes)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            new NodeStatus.NodeStatusBuilder()
+                .setNodeState(NodeState.Provisioned)
+                .setNodeSubState(NodeSubState.ServerSetup)
+                .build(),
+            filteredNodes -> {
+              createConfigureServerTasks(filteredNodes, true /* isShell */)
+                  .setSubTaskGroupType(SubTaskGroupType.InstallingSoftware);
+            });
+
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            new NodeStatus.NodeStatusBuilder()
+                .setNodeState(NodeState.SoftwareInstalled)
+                .setNodeSubState(NodeSubState.ServerConfigured)
+                .build(),
+            filteredNodes -> {
+              // All necessary nodes are created. Data moving will coming soon.
+              createSetNodeStatusTasks(
+                      filteredNodes,
+                      new NodeStatus.NodeStatusBuilder()
+                          .setNodeState(NodeState.ToJoinCluster)
+                          .setNodeSubState(NodeSubState.ServerConfigured)
+                          .setMasterState(MasterState.Stopped)
+                          .setTServerState(TserverState.Stopped)
+                          .build())
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+    subTaskGroupQueue.run();
   }
 }

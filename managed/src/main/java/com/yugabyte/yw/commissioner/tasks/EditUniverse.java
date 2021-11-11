@@ -13,6 +13,7 @@ package com.yugabyte.yw.commissioner.tasks;
 import com.yugabyte.yw.commissioner.BaseTaskDependencies;
 import com.yugabyte.yw.commissioner.SubTaskGroupQueue;
 import com.yugabyte.yw.commissioner.UserTaskDetails.SubTaskGroupType;
+import com.yugabyte.yw.commissioner.tasks.UniverseDefinitionTaskBase.ServerType;
 import com.yugabyte.yw.commissioner.tasks.subtasks.ModifyBlackList;
 import com.yugabyte.yw.common.DnsManager;
 import com.yugabyte.yw.common.PlacementInfoUtil;
@@ -23,6 +24,7 @@ import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.ClusterType;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.UserIntent;
 import com.yugabyte.yw.models.Universe;
 import com.yugabyte.yw.models.helpers.NodeDetails;
+import com.yugabyte.yw.models.helpers.NodeDetails.MasterState;
 import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,6 +50,16 @@ public class EditUniverse extends UniverseDefinitionTaskBase {
   }
 
   @Override
+  public boolean isAbortable() {
+    return true;
+  }
+
+  @Override
+  public boolean isRetryable() {
+    return true;
+  }
+
+  @Override
   public void run() {
     log.info("Started {} task for uuid={}", getName(), taskParams().universeUUID);
     String errorString = null;
@@ -62,52 +74,58 @@ public class EditUniverse extends UniverseDefinitionTaskBase {
 
       // Update the universe DB with the changes to be performed and set the 'updateInProgress' flag
       // to prevent other updates from happening.
-      Universe universe = lockUniverseForUpdate(taskParams().expectedUniverseVersion);
+      Universe universe =
+          lockUniverseForUpdate(
+              taskParams().expectedUniverseVersion,
+              u -> {
+                preTaskActions();
 
-      preTaskActions();
-
-      // Set all the node names.
-      setNodeNames(universe);
-
-      updateOnPremNodeUuidsOnTaskParams();
-
-      // Run preflight checks on onprem nodes to be added.
-      if (performUniversePreflightChecks(taskParams().clusters)) {
-        // Select master nodes, if needed.
-        SelectMastersResult selection = selectMasters(universe.getMasterLeaderHostText());
-        verifyMastersSelection();
-
-        // Update the user intent.
-        writeUserIntentToUniverse(false);
-
-        for (Cluster cluster : taskParams().clusters) {
-          addDefaultGFlags(cluster.userIntent);
-          editCluster(
-              universe,
-              cluster,
-              getNodesInCluster(cluster.uuid, selection.addedMasters),
-              getNodesInCluster(cluster.uuid, selection.removedMasters));
-        }
-
-        // Wait for the master leader to hear from all tservers.
-        createWaitForTServerHeartBeatsTask()
-            .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
-
-        // Update the DNS entry for this universe, based in primary provider info.
-        UserIntent primaryIntent = universe.getUniverseDetails().getPrimaryCluster().userIntent;
-        createDnsManipulationTask(DnsManager.DnsCommandType.Edit, false, primaryIntent)
-            .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
-
-        // Marks the update of this universe as a success only if all the tasks before it succeeded.
-        createMarkUniverseUpdateSuccessTasks()
-            .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
-      } else {
-        errorString = "Preflight checks failed.";
+                // Set all the node names.
+                setNodeNames(u);
+                updateOnPremNodeUuidsOnTaskParams();
+                if (!performUniversePreflightChecks(taskParams().clusters)) {
+                  throw new RuntimeException("Preflight checks failed.");
+                }
+                if (taskParams().firstTry) {
+                  selectMasters(u.getMasterLeaderHostText());
+                  verifyMastersSelection();
+                  setUserIntentToUniverse(u, false);
+                }
+              });
+      for (Cluster cluster : taskParams().clusters) {
+        addDefaultGFlags(cluster.userIntent);
+        Set<NodeDetails> nodes = universe.getUniverseDetails().getNodesInCluster(cluster.uuid);
+        Set<NodeDetails> addedMasters =
+            nodes
+                .stream()
+                .filter(n -> n.masterState == MasterState.ToBeStarted)
+                .collect(Collectors.toSet());
+        Set<NodeDetails> removedMasters =
+            nodes
+                .stream()
+                .filter(n -> n.masterState == MasterState.ToBeStopped)
+                .collect(Collectors.toSet());
+        editCluster(
+            universe,
+            cluster,
+            getNodesInCluster(cluster.uuid, addedMasters),
+            getNodesInCluster(cluster.uuid, removedMasters));
       }
+      // Wait for the master leader to hear from all tservers.
+      createWaitForTServerHeartBeatsTask().setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
 
+      // Update the DNS entry for this universe, based in primary provider info.
+      UserIntent primaryIntent = universe.getUniverseDetails().getPrimaryCluster().userIntent;
+      createDnsManipulationTask(DnsManager.DnsCommandType.Edit, false, primaryIntent)
+          .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
+
+      // Marks the update of this universe as a success only if all the tasks before it succeeded.
+      createMarkUniverseUpdateSuccessTasks()
+          .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
       // Run all the tasks.
       subTaskGroupQueue.run();
     } catch (Throwable t) {
+      errorString = t.getMessage();
       log.error("Error executing task {} with error='{}'.", getName(), t.getMessage(), t);
       throw t;
     } finally {
@@ -131,9 +149,9 @@ public class EditUniverse extends UniverseDefinitionTaskBase {
         userIntent.numNodes,
         userIntent.replicationFactor);
 
-    Collection<NodeDetails> nodesToBeRemoved = PlacementInfoUtil.getNodesToBeRemoved(nodes);
+    Set<NodeDetails> nodesToBeRemoved = PlacementInfoUtil.getNodesToBeRemoved(nodes);
 
-    Collection<NodeDetails> nodesToProvision = PlacementInfoUtil.getNodesToProvision(nodes);
+    Set<NodeDetails> nodesToProvision = PlacementInfoUtil.getNodesToProvision(nodes);
 
     List<NodeDetails> existingNodesToStartMaster =
         newMasters
@@ -197,21 +215,10 @@ public class EditUniverse extends UniverseDefinitionTaskBase {
             }
           });
 
-      // Create the required number of nodes in the appropriate locations.
-      createCreateServerTasks(nodesToProvision).setSubTaskGroupType(SubTaskGroupType.Provisioning);
-
-      // Get all information about the nodes of the cluster. This includes the public ip address,
-      // the private ip address (in the case of AWS), etc.
-      createServerInfoTasks(nodesToProvision).setSubTaskGroupType(SubTaskGroupType.Provisioning);
-
-      // Provision the required nodes so that Yugabyte software can be deployed.
-      createSetupServerTasks(nodesToProvision).setSubTaskGroupType(SubTaskGroupType.Provisioning);
-
-      // Configures and deploys software on all the nodes (masters and tservers).
-      createConfigureServerTasks(nodesToProvision, true /* isShell */)
-          .setSubTaskGroupType(SubTaskGroupType.InstallingSoftware);
+      provisionNodes(universe, cluster, nodesToProvision);
 
       // Override master (on primary cluster only) and tserver flags as necessary.
+      // These call do not need to be tracked in the node status.
       if (cluster.clusterType == ClusterType.PRIMARY) {
         createGFlagsOverrideTasks(nodesToProvision, ServerType.MASTER);
       }
@@ -240,10 +247,6 @@ public class EditUniverse extends UniverseDefinitionTaskBase {
       }
     }
     removeMasters.addAll(mastersToStop);
-
-    // All necessary nodes are created. Data moving will coming soon.
-    createSetNodeStateTasks(nodesToProvision, NodeDetails.NodeState.ToJoinCluster)
-        .setSubTaskGroupType(SubTaskGroupType.Provisioning);
 
     // Creates the primary cluster by first starting the masters.
     if (!newMasters.isEmpty()) {
@@ -384,7 +387,7 @@ public class EditUniverse extends UniverseDefinitionTaskBase {
    * Fills in the series of steps needed to move the masters using the node names. The actual node
    * details (such as ip addresses) are found at runtime by querying the database.
    */
-  private void createMoveMastersTasks(
+  protected void createMoveMastersTasks(
       SubTaskGroupType subTask, Set<NodeDetails> newMasters, Set<NodeDetails> removeMasters) {
 
     // Get the list of node names to add as masters.

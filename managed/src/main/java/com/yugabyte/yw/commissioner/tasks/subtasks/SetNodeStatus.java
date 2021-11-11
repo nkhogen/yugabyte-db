@@ -1,34 +1,25 @@
-/*
- * Copyright 2019 YugaByte, Inc. and Contributors
- *
- * Licensed under the Polyform Free Trial License 1.0.0 (the "License"); you
- * may not use this file except in compliance with the License. You
- * may obtain a copy of the License at
- *
- *     https://github.com/YugaByte/yugabyte-db/blob/master/licenses/POLYFORM-FREE-TRIAL-LICENSE-1.0.0.txt
- */
-
 package com.yugabyte.yw.commissioner.tasks.subtasks;
+
+import javax.inject.Inject;
 
 import com.yugabyte.yw.commissioner.BaseTaskDependencies;
 import com.yugabyte.yw.commissioner.tasks.params.NodeTaskParams;
+import com.yugabyte.yw.commissioner.tasks.subtasks.SetNodeState.Params;
 import com.yugabyte.yw.common.NodeManager;
 import com.yugabyte.yw.models.helpers.NodeDetails;
-import javax.inject.Inject;
+import com.yugabyte.yw.models.helpers.NodeStatus;
+
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class SetNodeState extends NodeTaskBase {
+public class SetNodeStatus extends NodeTaskBase {
 
   @Inject
-  protected SetNodeState(BaseTaskDependencies baseTaskDependencies, NodeManager nodeManager) {
+  protected SetNodeStatus(BaseTaskDependencies baseTaskDependencies, NodeManager nodeManager) {
     super(baseTaskDependencies, nodeManager);
   }
 
-  public static class Params extends NodeTaskParams {
-    public NodeDetails.NodeState state;
-    public NodeDetails.NodeSubState subState;
-  }
+  public static class Params extends NodeTaskParams {}
 
   protected Params taskParams() {
     return (Params) taskParams;
@@ -40,7 +31,7 @@ public class SetNodeState extends NodeTaskBase {
         + "("
         + taskParams().nodeName
         + ", "
-        + taskParams().state.toString()
+        + taskParams().targetNodeStatus
         + ")";
   }
 
@@ -48,11 +39,11 @@ public class SetNodeState extends NodeTaskBase {
   public void run() {
     try {
       log.info(
-          "Updating node {} status to {} in universe {}.",
+          "Updating node {} state to {} in universe {}.",
           taskParams().nodeName,
           taskParams().targetNodeStatus,
           taskParams().universeUUID);
-      setNodeState(taskParams().state);
+      setNodeStatus(taskParams().targetNodeStatus);
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
