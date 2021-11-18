@@ -124,6 +124,8 @@ public class NodeDetails {
   public enum MasterState {
     // TODO add more relevant states.
     None,
+    ToBeStarted,
+    ToBeStopped,
     Stopped,
     Started,
     Running,
@@ -327,5 +329,9 @@ public class NodeDetails {
 
   public String getNodeName() {
     return nodeName;
+  }
+
+  public UUID getNodeUUID() {
+    return nodeUuid;
   }
 }

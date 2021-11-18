@@ -755,4 +755,8 @@ public class UniverseDefinitionTaskParams extends UniverseTaskParams {
       return taskParams;
     }
   }
+
+  public boolean isFirstTry() {
+    return firstTry && previousTaskUUID == null;
+  }
 }

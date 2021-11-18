@@ -6,8 +6,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.inject.Inject;
 import com.yugabyte.yw.commissioner.Commissioner;
+import com.yugabyte.yw.commissioner.ITask;
+import com.yugabyte.yw.commissioner.TaskExecutor;
 import com.yugabyte.yw.commissioner.UserTaskDetails.SubTaskGroupType;
+import com.yugabyte.yw.commissioner.tasks.UniverseDefinitionTaskBase;
 import com.yugabyte.yw.common.ApiResponse;
+import com.yugabyte.yw.common.PlatformServiceException;
 import com.yugabyte.yw.common.config.RuntimeConfigFactory;
 import com.yugabyte.yw.forms.CustomerTaskFormData;
 import com.yugabyte.yw.forms.PlatformResults;
@@ -23,6 +27,9 @@ import io.ebean.Query;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.Authorization;
+
+import static play.mvc.Http.Status.BAD_REQUEST;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -243,23 +250,27 @@ public class CustomerTaskController extends AuthenticatedController {
       response = UniverseResp.class)
   public Result retryTask(UUID customerUUID, UUID taskUUID) {
     Customer customer = Customer.getOrBadRequest(customerUUID);
-    CustomerTask.getOrBadRequest(customer.uuid, taskUUID);
     TaskInfo taskInfo = TaskInfo.getOrBadRequest(taskUUID);
+    TaskType taskType = taskInfo.getTaskType();
+    Class<? extends ITask> taskClass = TaskExecutor.getTaskClass(taskType);
 
-    if (taskInfo.getTaskType() != TaskType.CreateUniverse) {
+    if (!UniverseDefinitionTaskBase.class.isAssignableFrom(taskClass)) {
       String errMsg =
           String.format(
-              "Invalid task type: %s. Only 'Create Universe' task retries are supported.",
-              taskInfo.getTaskType().toString());
+              "Invalid task type: %s. Only Universe task retries are supported.", taskType);
       return ApiResponse.error(BAD_REQUEST, errMsg);
     }
 
     JsonNode oldTaskParams = commissioner.getTaskDetails(taskUUID);
     UniverseDefinitionTaskParams params =
         Json.fromJson(oldTaskParams, UniverseDefinitionTaskParams.class);
-    params.firstTry = false;
     Universe universe = Universe.getOrBadRequest(params.universeUUID);
-
+    if (!taskUUID.equals(universe.getUniverseDetails().updatingTaskUUID)) {
+      String errMsg = String.format("Invalid task state: Task %s cannot retried", taskUUID);
+      return ApiResponse.error(BAD_REQUEST, errMsg);
+    }
+    params.firstTry = false;
+    params.previousTaskUUID = taskUUID;
     UUID newTaskUUID = commissioner.submit(taskInfo.getTaskType(), params);
     LOG.info(
         "Submitted retry task to create universe for {}:{}, task uuid = {}.",
@@ -273,6 +284,7 @@ public class CustomerTaskController extends AuthenticatedController {
         universe.universeUUID,
         newTaskUUID,
         CustomerTask.TargetType.Universe,
+        // TODO need to change task type
         CustomerTask.TaskType.Create,
         universe.name);
     LOG.info(
@@ -285,5 +297,20 @@ public class CustomerTaskController extends AuthenticatedController {
 
     auditService().createAuditEntry(ctx(), request(), Json.toJson(params), newTaskUUID);
     return PlatformResults.withData(new UniverseResp(universe, newTaskUUID));
+  }
+
+  @ApiOperation(value = "Abort a task", notes = "Aborts an ongoing task", response = Object.class)
+  public Result abortTask(UUID customerUUID, UUID taskUUID) {
+    Customer.getOrBadRequest(customerUUID);
+    TaskInfo taskInfo = TaskInfo.getOrBadRequest(taskUUID);
+    TaskType taskType = taskInfo.getTaskType();
+    Class<? extends ITask> taskClass = TaskExecutor.getTaskClass(taskType);
+    if (!UniverseDefinitionTaskBase.class.isAssignableFrom(taskClass)) {
+      String errMsg =
+          String.format("Invalid task type: %s. Only Universe tasks can be aborted.", taskType);
+      return ApiResponse.error(BAD_REQUEST, errMsg);
+    }
+    commissioner.abort(taskUUID);
+    return PlatformResults.withData(TaskInfo.getOrBadRequest(taskUUID));
   }
 }

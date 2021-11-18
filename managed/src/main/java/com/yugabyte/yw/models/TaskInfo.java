@@ -69,8 +69,8 @@ public class TaskInfo extends Model {
     @EnumValue("Unknown")
     Unknown,
 
-    @EnumValue("Aborting")
-    Aborting,
+    @EnumValue("Abort")
+    Abort,
 
     @EnumValue("Aborted")
     Aborted

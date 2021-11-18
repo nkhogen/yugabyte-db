@@ -74,7 +74,7 @@ public class NodeStatus {
   }
 
   public static NodeStatus fromNode(NodeDetails node) {
-    return new NodeStatus.NodeStatusBuilder()
+    return new NodeStatusBuilder()
         .setNodeState(node.state)
         .setNodeSubState(node.subState)
         .setMasterState(node.masterState)
@@ -96,5 +96,9 @@ public class NodeStatus {
     if (tserverState != null) {
       node.tserverState = (tserverState == TserverState.None) ? null : tserverState;
     }
+  }
+
+  public static void copyStates(NodeDetails fromNode, NodeDetails toNode) {
+    NodeStatus.fromNode(fromNode).fillNodeStates(toNode);
   }
 }

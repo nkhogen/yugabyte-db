@@ -20,6 +20,8 @@ import com.yugabyte.yw.models.Universe;
 import com.yugabyte.yw.models.Universe.UniverseUpdater;
 import com.yugabyte.yw.models.helpers.CloudSpecificInfo;
 import com.yugabyte.yw.models.helpers.NodeDetails;
+import com.yugabyte.yw.models.helpers.NodeStatus;
+
 import java.lang.reflect.Field;
 import java.util.Iterator;
 import java.util.Map.Entry;
@@ -112,6 +114,8 @@ public class AnsibleUpdateNodeInfo extends NodeTaskBase {
             }
             // Node provisioning completed.
             node.state = NodeDetails.NodeState.Provisioned;
+            node.subState = NodeDetails.NodeSubState.InstanceCreated;
+
             // Update the node details.
             universeDetails.nodeDetailsSet.add(node);
             universe.setUniverseDetails(universeDetails);
