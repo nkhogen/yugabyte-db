@@ -569,7 +569,7 @@ public class TaskExecutor {
           if (log.isTraceEnabled()) {
             log.trace("Task {} has taken {}ms", subTaskRunner.getTaskUUID(), elapsed.toMillis());
           }
-          // If the subtask execution took long,
+          // If the subtask execution takes long,
           // it is interrupted.
           if ((!timeout.isZero() && elapsed.compareTo(timeout) > 0)
               || (taskContext.abortTime != null

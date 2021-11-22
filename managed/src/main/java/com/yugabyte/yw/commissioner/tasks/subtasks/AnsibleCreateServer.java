@@ -17,6 +17,9 @@ import com.yugabyte.yw.common.NodeManager;
 import com.yugabyte.yw.common.ShellResponse;
 import com.yugabyte.yw.models.AccessKey;
 import com.yugabyte.yw.models.Provider;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeSubState;
+import com.yugabyte.yw.models.helpers.NodeStatus;
 import java.util.List;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -73,9 +76,11 @@ public class AnsibleCreateServer extends NodeTaskBase {
       ShellResponse response =
           getNodeManager().nodeCommand(NodeManager.NodeCommandType.Create, taskParams());
       processShellResponse(response);
-      if (taskParams().targetNodeStatus != null) {
-        setNodeStatus(taskParams().targetNodeStatus);
-      }
+      setNodeStatus(
+          NodeStatus.builder()
+              .nodeState(NodeState.Adding)
+              .nodeSubState(NodeSubState.InstanceCreated)
+              .build());
     }
   }
 }

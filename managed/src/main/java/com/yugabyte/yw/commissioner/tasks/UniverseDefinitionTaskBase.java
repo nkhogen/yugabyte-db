@@ -35,6 +35,10 @@ import com.yugabyte.yw.models.Universe.UniverseUpdater;
 import com.yugabyte.yw.models.helpers.CloudSpecificInfo;
 import com.yugabyte.yw.models.helpers.NodeDetails;
 import com.yugabyte.yw.models.helpers.NodeStatus;
+import com.yugabyte.yw.models.helpers.NodeDetails.MasterState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeSubState;
+import com.yugabyte.yw.models.helpers.NodeDetails.TserverState;
 import com.yugabyte.yw.models.helpers.PlacementInfo;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -328,6 +332,22 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     return newName;
   }
 
+  public void populateTaskParams(Universe universe) {
+    for (Cluster cluster : taskParams().clusters) {
+      Map<UUID, NodeDetails> nodesMap =
+          universe
+              .getNodesInCluster(cluster.uuid)
+              .stream()
+              .collect(Collectors.toMap(NodeDetails::getNodeUUID, Function.identity()));
+      for (NodeDetails node : taskParams().getNodesInCluster(cluster.uuid)) {
+        NodeDetails nodeInUniverse = nodesMap.get(node.nodeUuid);
+        node.nodeIdx = nodeInUniverse.nodeIdx;
+        node.nodeName = nodeInUniverse.nodeName;
+        node.isMaster = nodeInUniverse.isMaster;
+      }
+    }
+  }
+
   // Set the universes' node prefix for universe creation op. And node names/indices of all the
   // being added nodes.
   public void setNodeNames(Universe universe) {
@@ -367,6 +387,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
           if (node.nodeName != null) {
             throw new IllegalStateException("Node name " + node.nodeName + " cannot be preset.");
           }
+          node.nodeUuid = UUID.randomUUID();
           node.nodeIdx = startIndex + iter;
           node.nodeName =
               getNodeName(
@@ -618,6 +639,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    * @param nodes : a collection of nodes that need to be created
    */
   public SubTaskGroup createStartTServersTasks(Collection<NodeDetails> nodes) {
+    NodeStatus targetNodeStatus = NodeStatus.builder().tserverState(TserverState.Started).build();
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleClusterServerCtl", executor);
     for (NodeDetails node : nodes) {
       AnsibleClusterServerCtl.Params params = new AnsibleClusterServerCtl.Params();
@@ -635,6 +657,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       // Set the InstanceType
       params.instanceType = node.cloudInfo.instance_type;
       params.useSystemd = userIntent.useSystemd;
+      params.targetNodeStatus = targetNodeStatus;
       // Create the Ansible task to get the server info.
       AnsibleClusterServerCtl task = createTask(AnsibleClusterServerCtl.class);
       task.initialize(params);
@@ -750,6 +773,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     params.machineImage = node.machineImage;
     params.cmkArn = taskParams().cmkArn;
     params.ipArnString = userIntent.awsArnString;
+    params.nodeUuid = node.nodeUuid;
   }
 
   /**
@@ -759,6 +783,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    */
   public SubTaskGroup createSetupServerTasks(
       Collection<NodeDetails> nodes, boolean isSystemdUpgrade) {
+    NodeStatus targetNodeStatus =
+        NodeStatus.builder().nodeSubState(NodeSubState.ServerSetup).build();
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleSetupServer", executor);
     for (NodeDetails node : nodes) {
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
@@ -766,6 +792,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       fillSetupParamsForNode(params, userIntent, node);
       params.useSystemd = userIntent.useSystemd;
       params.isSystemdUpgrade = isSystemdUpgrade;
+      params.targetNodeStatus = targetNodeStatus;
 
       // Create the Ansible task to setup the server.
       AnsibleSetupServer ansibleSetupServer = createTask(AnsibleSetupServer.class);
@@ -792,7 +819,6 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
       AnsibleCreateServer.Params params = new AnsibleCreateServer.Params();
       fillCreateParamsForNode(params, userIntent, node);
-
       // Create the Ansible task to setup the server.
       AnsibleCreateServer ansibleCreateServer = createTask(AnsibleCreateServer.class);
       ansibleCreateServer.initialize(params);
@@ -881,7 +907,6 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
 
       // Development testing variable.
       params.itestS3PackagePath = taskParams().itestS3PackagePath;
-
       Universe universe = Universe.getOrBadRequest(taskParams().universeUUID);
       UUID custUUID = Customer.get(universe.customerId).uuid;
 
@@ -916,7 +941,6 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    */
   public SubTaskGroup createServerInfoTasks(Collection<NodeDetails> nodes) {
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleUpdateNodeInfo", executor);
-
     for (NodeDetails node : nodes) {
       NodeTaskParams params = new NodeTaskParams();
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
@@ -1136,5 +1160,132 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       isNodeStatusMatched = true;
     }
     return isNodeStatusMatched;
+  }
+
+  /**
+   * Creates a set of nodes.
+   *
+   * @param cluster the cluster to which the nodes belong.
+   * @param nodesToProvision the nodes to be created.
+   */
+  public boolean createNodes(
+      Universe universe,
+      Cluster cluster,
+      Set<NodeDetails> nodesToProvision,
+      boolean skipNodeStatusCheck) {
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            NodeStatus.builder().nodeState(NodeState.ToBeAdded).build(),
+            filteredNodes -> {
+              createSetNodeStatusTasks(
+                      filteredNodes, NodeStatus.builder().nodeState(NodeState.Adding).build())
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            NodeStatus.builder().nodeState(NodeState.Adding).build(),
+            filteredNodes -> {
+              createCreateServerTasks(filteredNodes)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            NodeStatus.builder()
+                .nodeState(NodeState.Adding)
+                .nodeSubState(NodeSubState.InstanceCreated)
+                .build(),
+            filteredNodes -> {
+              createServerInfoTasks(filteredNodes)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            NodeStatus.builder()
+                .nodeState(NodeState.Provisioned)
+                .nodeSubState(NodeSubState.InstanceCreated)
+                .build(),
+            filteredNodes -> {
+              createSetupServerTasks(filteredNodes)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+    subTaskGroupQueue.run();
+    return skipNodeStatusCheck;
+  }
+
+  /**
+   * Configures the set of nodes.
+   *
+   * @param cluster the cluster to which the nodes belong.
+   * @param nodesToProvision the nodes to be configured.
+   */
+  public boolean configureNodes(
+      Universe universe,
+      Cluster cluster,
+      Set<NodeDetails> nodesToProvision,
+      boolean isShellMode,
+      boolean skipNodeStatusCheck) {
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            NodeStatus.builder()
+                .nodeState(NodeState.Provisioned)
+                .nodeSubState(NodeSubState.ServerSetup)
+                .build(),
+            filteredNodes -> {
+              createConfigureServerTasks(filteredNodes, isShellMode /* isShell */)
+                  .setSubTaskGroupType(SubTaskGroupType.InstallingSoftware);
+            });
+    skipNodeStatusCheck =
+        filterNodesByStatus(
+            universe,
+            nodesToProvision,
+            skipNodeStatusCheck,
+            NodeStatus.builder()
+                .nodeState(NodeState.SoftwareInstalled)
+                .nodeSubState(NodeSubState.ServerConfigured)
+                .build(),
+            filteredNodes -> {
+              // All necessary nodes are created. Data moving will coming soon.
+              createSetNodeStatusTasks(
+                      filteredNodes,
+                      NodeStatus.builder()
+                          .nodeState(NodeState.ToJoinCluster)
+                          .nodeSubState(NodeSubState.ServerConfigured)
+                          .masterState(MasterState.Stopped)
+                          .tserverState(TserverState.Stopped)
+                          .build())
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+            });
+    subTaskGroupQueue.run();
+    return skipNodeStatusCheck;
+  }
+
+  /**
+   * Provisions the set of nodes.
+   *
+   * @param cluster the cluster to which the nodes belong.
+   * @param nodesToProvision the nodes to be provisioned.
+   */
+  public boolean provisionNodes(
+      Universe universe, Cluster cluster, Set<NodeDetails> nodesToProvision, boolean isShellMode) {
+    boolean skipNodeStatusCheck = false;
+    skipNodeStatusCheck = createNodes(universe, cluster, nodesToProvision, skipNodeStatusCheck);
+    return configureNodes(universe, cluster, nodesToProvision, isShellMode, skipNodeStatusCheck);
   }
 }

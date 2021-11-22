@@ -12,6 +12,7 @@ package com.yugabyte.yw.commissioner.tasks;
 
 import static com.yugabyte.yw.common.Util.areMastersUnderReplicated;
 
+import com.google.common.collect.ImmutableSet;
 import com.yugabyte.yw.commissioner.BaseTaskDependencies;
 import com.yugabyte.yw.commissioner.Common.CloudType;
 import com.yugabyte.yw.commissioner.SubTaskGroupQueue;
@@ -23,6 +24,8 @@ import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.UserIntent;
 import com.yugabyte.yw.models.NodeInstance;
 import com.yugabyte.yw.models.Universe;
 import com.yugabyte.yw.models.helpers.NodeDetails;
+import com.yugabyte.yw.models.helpers.NodeStatus;
+import com.yugabyte.yw.models.helpers.NodeDetails.MasterState;
 import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,6 +34,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -66,7 +70,7 @@ public class AddNodeToUniverse extends UniverseDefinitionTaskBase {
       subTaskGroupQueue = new SubTaskGroupQueue(userTaskUUID);
 
       // Update the DB to prevent other changes from happening.
-      Universe universe = lockUniverseForUpdate(taskParams().expectedUniverseVersion);
+      Universe universe = lockUniverseForUpdate(taskParams().expectedUniverseVersion, u -> {});
 
       currentNode = universe.getNode(taskParams().nodeName);
       if (currentNode == null) {
@@ -91,8 +95,9 @@ public class AddNodeToUniverse extends UniverseDefinitionTaskBase {
 
       Cluster cluster = taskParams().getClusterByUuid(currentNode.placementUuid);
       UserIntent userIntent = cluster.userIntent;
-      Collection<NodeDetails> node = Collections.singletonList(currentNode);
+      Set<NodeDetails> node = ImmutableSet.of(currentNode);
 
+      boolean skipNodeStatusCheck = false;
       boolean wasDecommissioned = currentNode.state == NodeState.Decommissioned;
       // For onprem universes, allocate an available node
       // from the provider's node_instance table.
@@ -125,17 +130,19 @@ public class AddNodeToUniverse extends UniverseDefinitionTaskBase {
 
         // First spawn an instance for Decommissioned node.
         if (wasDecommissioned) {
-          createCreateServerTasks(node).setSubTaskGroupType(SubTaskGroupType.Provisioning);
+          skipNodeStatusCheck = createNodes(universe, cluster, node, skipNodeStatusCheck);
+          // createCreateServerTasks(node).setSubTaskGroupType(SubTaskGroupType.Provisioning);
 
-          createServerInfoTasks(node).setSubTaskGroupType(SubTaskGroupType.Provisioning);
+          // createServerInfoTasks(node).setSubTaskGroupType(SubTaskGroupType.Provisioning);
 
-          createSetupServerTasks(node).setSubTaskGroupType(SubTaskGroupType.Provisioning);
+          // createSetupServerTasks(node).setSubTaskGroupType(SubTaskGroupType.Provisioning);
         }
 
         // Re-install software.
         // TODO: Remove the need for version for existing instance, NodeManger needs changes.
-        createConfigureServerTasks(node, true /* isShell */)
-            .setSubTaskGroupType(SubTaskGroupType.InstallingSoftware);
+        configureNodes(universe, cluster, node, true, skipNodeStatusCheck);
+        // createConfigureServerTasks(node, true /* isShell */)
+        //    .setSubTaskGroupType(SubTaskGroupType.InstallingSoftware);
 
         // Set default gflags
         addDefaultGFlags(cluster.userIntent);
@@ -157,17 +164,23 @@ public class AddNodeToUniverse extends UniverseDefinitionTaskBase {
           // Start a shell master process.
           createStartMasterTasks(node).setSubTaskGroupType(SubTaskGroupType.StartingNodeProcesses);
 
-          // Mark node as a master in YW DB.
-          // Do this last so that master addresses does not pick up current node.
-          createUpdateNodeProcessTask(taskParams().nodeName, ServerType.MASTER, true)
-              .setSubTaskGroupType(SubTaskGroupType.StartingNodeProcesses);
-
           // Wait for master to be responsive.
           createWaitForServersTasks(node, ServerType.MASTER)
               .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
 
+          createSetNodeStatusTasks(
+              node, NodeStatus.builder().masterState(MasterState.Running).build());
+
           // Add it into the master quorum.
           createChangeConfigTask(currentNode, true, SubTaskGroupType.WaitForDataMigration);
+
+          createSetNodeStatusTasks(
+              node, NodeStatus.builder().masterState(MasterState.Joined).build());
+
+          // Mark node as a master in YW DB.
+          // Do this last so that master addresses does not pick up current node.
+          createUpdateNodeProcessTask(taskParams().nodeName, ServerType.MASTER, true)
+              .setSubTaskGroupType(SubTaskGroupType.StartingNodeProcesses);
 
           masterAdded = true;
         }

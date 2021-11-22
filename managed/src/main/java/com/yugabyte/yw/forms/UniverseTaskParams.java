@@ -236,4 +236,8 @@ public class UniverseTaskParams extends AbstractTaskParams {
   // Previous task UUID for a retry.
   @ApiModelProperty(value = "Previous task UUID only if this task is a retry")
   public UUID previousTaskUUID;
+
+  public boolean isFirstTry() {
+    return false;
+  }
 }

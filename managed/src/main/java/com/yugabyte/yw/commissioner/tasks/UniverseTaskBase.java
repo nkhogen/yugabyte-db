@@ -83,6 +83,10 @@ import com.yugabyte.yw.models.helpers.NodeDetails;
 import com.yugabyte.yw.models.helpers.NodeStatus;
 import com.yugabyte.yw.models.helpers.TableDetails;
 import com.yugabyte.yw.models.helpers.TaskType;
+import com.yugabyte.yw.models.helpers.NodeDetails.MasterState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
+import com.yugabyte.yw.models.helpers.NodeDetails.NodeSubState;
+import com.yugabyte.yw.models.helpers.NodeDetails.TserverState;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
@@ -200,7 +204,9 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     return new UniverseUpdater() {
       @Override
       public void run(Universe universe) {
-        verifyUniverseVersion(expectedUniverseVersion, universe);
+        if (taskParams().isFirstTry()) {
+          verifyUniverseVersion(expectedUniverseVersion, universe);
+        }
         UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
         if (universeDetails.universePaused && !isResumeOrDelete) {
           String msg = "Universe " + taskParams().universeUUID + " is currently paused";
@@ -753,6 +759,31 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     return subTaskGroup;
   }
 
+  /**
+   * Create tasks to update the status of the nodes.
+   *
+   * @param nodes the set if nodes to be updated.
+   * @param nodeStatus the status into which these nodes will be transitioned.
+   * @return
+   */
+  public SubTaskGroup createSetNodeStatusTasks(
+      Collection<NodeDetails> nodes, NodeStatus nodeStatus) {
+    SubTaskGroup subTaskGroup = new SubTaskGroup("SetNodeStatus", executor);
+    for (NodeDetails node : nodes) {
+      SetNodeStatus.Params params = new SetNodeStatus.Params();
+      params.universeUUID = taskParams().universeUUID;
+      params.azUuid = node.azUuid;
+      params.nodeName = node.nodeName;
+      params.targetNodeStatus = nodeStatus;
+      SetNodeStatus task = createTask(SetNodeStatus.class);
+      task.initialize(params);
+      task.setUserTaskUUID(userTaskUUID);
+      subTaskGroup.addTask(task);
+    }
+    subTaskGroupQueue.add(subTaskGroup);
+    return subTaskGroup;
+  }
+
   public SubTaskGroup createWaitForKeyInMemoryTask(NodeDetails node) {
     SubTaskGroup subTaskGroup = new SubTaskGroup("WaitForEncryptionKeyInMemory", executor);
     WaitForEncryptionKeyInMemory.Params params = new WaitForEncryptionKeyInMemory.Params();
@@ -864,31 +895,6 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     task.initialize(params);
     task.setUserTaskUUID(userTaskUUID);
     subTaskGroup.addTask(task);
-    subTaskGroupQueue.add(subTaskGroup);
-    return subTaskGroup;
-  }
-
-  /**
-   * Create tasks to update the status of the nodes.
-   *
-   * @param nodes the set if nodes to be updated.
-   * @param nodeStatus the status into which these nodes will be transitioned.
-   * @return
-   */
-  public SubTaskGroup createSetNodeStatusTasks(
-      Collection<NodeDetails> nodes, NodeStatus nodeStatus) {
-    SubTaskGroup subTaskGroup = new SubTaskGroup("SetNodeStatus", executor);
-    for (NodeDetails node : nodes) {
-      SetNodeStatus.Params params = new SetNodeStatus.Params();
-      params.universeUUID = taskParams().universeUUID;
-      params.azUuid = node.azUuid;
-      params.nodeName = node.nodeName;
-      params.targetNodeStatus = nodeStatus;
-      SetNodeStatus task = createTask(SetNodeStatus.class);
-      task.initialize(params);
-      task.setUserTaskUUID(userTaskUUID);
-      subTaskGroup.addTask(task);
-    }
     subTaskGroupQueue.add(subTaskGroup);
     return subTaskGroup;
   }
@@ -1173,6 +1179,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
    * @return The subtask group.
    */
   public SubTaskGroup createStartMasterTasks(Collection<NodeDetails> nodes) {
+    NodeStatus targetNodeStatus = NodeStatus.builder().masterState(MasterState.Started).build();
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleClusterServerCtl", executor);
     for (NodeDetails node : nodes) {
       AnsibleClusterServerCtl.Params params = new AnsibleClusterServerCtl.Params();
@@ -1188,6 +1195,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
       params.placementUuid = node.placementUuid;
       // Set the InstanceType
       params.instanceType = node.cloudInfo.instance_type;
+      params.targetNodeStatus = targetNodeStatus;
       // Create the Ansible task to get the server info.
       AnsibleClusterServerCtl task = createTask(AnsibleClusterServerCtl.class);
       task.initialize(params);
@@ -1216,6 +1224,13 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
    */
   public SubTaskGroup createStopServerTasks(
       Collection<NodeDetails> nodes, String serverType, boolean isForceDelete) {
+    NodeStatus.NodeStatusBuilder nodeStatusBldr = NodeStatus.builder();
+    if ("master".equalsIgnoreCase(serverType)) {
+      nodeStatusBldr.masterState(MasterState.Stopped);
+    } else {
+      nodeStatusBldr.tserverState(TserverState.Stopped);
+    }
+    NodeStatus targetNodeStatus = nodeStatusBldr.build();
     SubTaskGroup subTaskGroup = new SubTaskGroup("AnsibleClusterServerCtl", executor);
     for (NodeDetails node : nodes) {
       AnsibleClusterServerCtl.Params params = new AnsibleClusterServerCtl.Params();
@@ -1231,6 +1246,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
       // Set the InstanceType
       params.instanceType = node.cloudInfo.instance_type;
       params.isForceDelete = isForceDelete;
+      params.targetNodeStatus = targetNodeStatus;
       // Create the Ansible task to get the server info.
       AnsibleClusterServerCtl task = createTask(AnsibleClusterServerCtl.class);
       task.initialize(params);
