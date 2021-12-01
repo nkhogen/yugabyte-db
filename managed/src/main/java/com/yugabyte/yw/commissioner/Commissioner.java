@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
+import com.yugabyte.yw.commissioner.TaskExecutor.TaskRunner;
 import com.yugabyte.yw.common.PlatformExecutorFactory;
 import com.yugabyte.yw.common.PlatformServiceException;
 import com.yugabyte.yw.common.config.RuntimeConfigFactory;
@@ -41,6 +42,8 @@ public class Commissioner {
 
   private final ExecutorService executor;
 
+  private final TaskExecutor taskExecutor;
+
   // A map of all task UUID's to the task runner objects for all the user tasks that are currently
   // active. Recently completed tasks are also in this list, their completion percentage should be
   // persisted before removing the task from this map.
@@ -50,9 +53,11 @@ public class Commissioner {
   public Commissioner(
       ProgressMonitor progressMonitor,
       ApplicationLifecycle lifecycle,
-      PlatformExecutorFactory platformExecutorFactory) {
+      PlatformExecutorFactory platformExecutorFactory,
+      TaskExecutor taskExecutor) {
     ThreadFactory namedThreadFactory =
         new ThreadFactoryBuilder().setNameFormat("TaskPool-%d").build();
+    this.taskExecutor = taskExecutor;
     executor = platformExecutorFactory.createExecutor("commissioner", namedThreadFactory);
     LOG.info("Started Commissioner TaskPool.");
     progressMonitor.start(runningTasks);
@@ -71,14 +76,13 @@ public class Commissioner {
       boolean claimTask = true;
 
       // Create the task runner object based on the various parameters passed in.
-      TaskRunner taskRunner = TaskRunner.createTask(taskType, taskParams, claimTask);
+      TaskRunner taskRunner = taskExecutor.createTaskRunner(taskType, taskParams);
 
       if (claimTask) {
-        // Add this task to our queue.
-        runningTasks.put(taskRunner.getTaskUUID(), taskRunner);
-
         // If we had claimed ownership of the task, submit it to the task threadpool.
-        executor.submit(taskRunner);
+        UUID taskUUID = taskExecutor.submit(taskRunner, executor);
+        // Add this task to our queue.
+        runningTasks.put(taskUUID, taskRunner);
       }
       return taskRunner.getTaskUUID();
     } catch (Throwable t) {
@@ -86,6 +90,11 @@ public class Commissioner {
       LOG.error(msg, t);
       throw new RuntimeException(msg, t);
     }
+  }
+
+  public boolean abort(UUID taskUUID) {
+    Optional<TaskInfo> optional = taskExecutor.abort(taskUUID, false);
+    return optional.isPresent();
   }
 
   public ObjectNode getStatusOrBadRequest(UUID taskUUID) {
@@ -194,7 +203,6 @@ public class Commissioner {
             iter.remove();
           }
         }
-
         // TODO: Scan the DB for tasks that have failed to make progress and claim one if possible.
       } catch (Exception e) {
         log.error("Error running commissioner progress checker", e);
