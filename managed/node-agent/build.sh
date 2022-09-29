@@ -18,6 +18,7 @@ popd
 export GOPATH=$project_dir/third-party
 export GOBIN=$GOPATH/bin
 export PATH=$GOBIN:$PATH
+mkdir -p $GOBIN
 
 readonly build_output_dir="${project_dir}/build"
 if [[ ! -d $build_output_dir ]]; then
@@ -78,6 +79,10 @@ get_executable_name() {
         executable+='.exe'
     fi
     echo "$executable"
+}
+
+prepare() {
+    setup_protoc
 }
 
 build_for_platform() {
@@ -202,7 +207,7 @@ show_help() {
     cat >&2 <<-EOT
 
 Usage:
-./build.sh <fmt|build|clean|test|package <version>|update-dependencies>
+./build.sh <fmt|prepare|build|clean|test|package <version>|update-dependencies>
 EOT
 exit 1
 }
@@ -215,6 +220,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     fmt)
       fmt=true
+      ;;
+    prepare)
+      prepare=true
       ;;
     build)
       build=true
@@ -274,6 +282,12 @@ if [ "$fmt" == "true" ]; then
     format
 fi
 
+if [ "$prepare" == "true" ]; then
+    help_needed=false
+    echo "Preparing..."
+    prepare
+fi
+
 if [ "$build" == "true" ]; then
     help_needed=false
     echo "Building..."
@@ -281,7 +295,7 @@ if [ "$build" == "true" ]; then
         go mod init node-agent
     fi
     format
-    setup_protoc
+    prepare
     generate_grpc_files
     build_for_platforms "${PLATFORMS[@]}"
 fi
