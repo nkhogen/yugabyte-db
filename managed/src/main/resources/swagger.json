@@ -1396,7 +1396,7 @@
         },
         "target" : {
           "description" : "Target",
-          "enum" : [ "Session", "CloudProvider", "Region", "AvailabilityZone", "CustomerConfig", "KMSConfig", "Customer", "Release", "Certificate", "CustomCACertificate", "Alert", "AlertTemplateSettings", "AlertTemplateVariables", "AlertChannel", "AlertChannelTemplates", "AlertDestination", "MaintenanceWindow", "AccessKey", "Universe", "XClusterConfig", "DrConfig", "Table", "Backup", "CustomerTask", "NodeInstance", "PlatformInstance", "Schedule", "User", "LoggingConfig", "RuntimeConfigKey", "HAConfig", "HABackup", "ScheduledScript", "SupportBundle", "TelemetryProvider", "TroubleshootingPlatform", "GFlags", "Hook", "HookScope", "NodeAgent", "CustomerLicense", "PerformanceRecommendation", "PerformanceAdvisorSettings", "PerformanceAdvisorRun", "Role", "RoleBinding", "OIDCGroupMapping", "GroupMapping" ],
+          "enum" : [ "Session", "CloudProvider", "Region", "AvailabilityZone", "CustomerConfig", "KMSConfig", "Customer", "Release", "Certificate", "CustomCACertificate", "Alert", "AlertTemplateSettings", "AlertTemplateVariables", "AlertChannel", "AlertChannelTemplates", "AlertDestination", "MaintenanceWindow", "AccessKey", "Universe", "XClusterConfig", "DrConfig", "Table", "Backup", "CustomerTask", "NodeInstance", "PlatformInstance", "Schedule", "User", "LoggingConfig", "RuntimeConfigKey", "HAConfig", "HABackup", "ScheduledScript", "SupportBundle", "TelemetryProvider", "TroubleshootingPlatform", "GFlags", "Hook", "HookScope", "NodeAgent", "CustomerLicense", "PerformanceRecommendation", "PerformanceAdvisorSettings", "PerformanceAdvisorRun", "Role", "RoleBinding", "OIDCGroupMapping", "GroupMapping", "JobSchedule" ],
           "example" : "User",
           "readOnly" : true,
           "type" : "string"
@@ -5155,6 +5155,32 @@
       },
       "type" : "object"
     },
+    "Duration" : {
+      "properties" : {
+        "nano" : {
+          "format" : "int32",
+          "type" : "integer"
+        },
+        "negative" : {
+          "type" : "boolean"
+        },
+        "seconds" : {
+          "format" : "int64",
+          "type" : "integer"
+        },
+        "units" : {
+          "items" : {
+            "$ref" : "#/definitions/TemporalUnit"
+          },
+          "type" : "array"
+        },
+        "zero" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "nano", "negative", "seconds", "units", "zero" ],
+      "type" : "object"
+    },
     "EditAccessKeyRotationScheduleParams" : {
       "properties" : {
         "schedulingFrequencyDays" : {
@@ -6217,6 +6243,426 @@
         }
       },
       "required" : [ "idKey" ],
+      "type" : "object"
+    },
+    "JobConfig" : {
+      "type" : "object"
+    },
+    "JobConfigWrapper" : {
+      "properties" : {
+        "config" : {
+          "$ref" : "#/definitions/JobConfig"
+        }
+      },
+      "type" : "object"
+    },
+    "JobInstance" : {
+      "properties" : {
+        "createdAt" : {
+          "description" : "Creation time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "endTime" : {
+          "description" : "End time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "jobScheduleUuid" : {
+          "description" : "Job schedule UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "startTime" : {
+          "description" : "Start time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "state" : {
+          "description" : "Job instance state",
+          "enum" : [ "FAILED", "RUNNING", "SUCCESS", "SCHEDULED", "SKIPPED" ],
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "uuid" : {
+          "description" : "Job instance UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        }
+      },
+      "type" : "object"
+    },
+    "JobInstanceApiFilter" : {
+      "properties" : {
+        "startWindowSecs" : {
+          "format" : "int64",
+          "type" : "integer"
+        },
+        "state" : {
+          "enum" : [ "FAILED", "RUNNING", "SUCCESS", "SCHEDULED", "SKIPPED" ],
+          "type" : "string"
+        }
+      },
+      "required" : [ "startWindowSecs", "state" ],
+      "type" : "object"
+    },
+    "JobInstancePagedApiQuery" : {
+      "properties" : {
+        "direction" : {
+          "enum" : [ "ASC", "DESC" ],
+          "type" : "string"
+        },
+        "filter" : {
+          "$ref" : "#/definitions/JobInstanceApiFilter"
+        },
+        "limit" : {
+          "format" : "int32",
+          "type" : "integer"
+        },
+        "needTotalCount" : {
+          "type" : "boolean"
+        },
+        "offset" : {
+          "format" : "int32",
+          "type" : "integer"
+        },
+        "sortBy" : {
+          "enum" : [ "uuid", "jobScheduleUuid", "startTime", "endTime", "state", "createdAt" ],
+          "type" : "string"
+        }
+      },
+      "required" : [ "direction", "filter", "limit", "needTotalCount", "offset", "sortBy" ],
+      "type" : "object"
+    },
+    "JobInstancePagedApiResponse" : {
+      "properties" : {
+        "entities" : {
+          "items" : {
+            "$ref" : "#/definitions/JobInstanceResp"
+          },
+          "type" : "array"
+        },
+        "hasNext" : {
+          "type" : "boolean"
+        },
+        "hasPrev" : {
+          "type" : "boolean"
+        },
+        "totalCount" : {
+          "format" : "int32",
+          "type" : "integer"
+        }
+      },
+      "required" : [ "entities", "hasNext", "hasPrev", "totalCount" ],
+      "type" : "object"
+    },
+    "JobInstanceResp" : {
+      "description" : "Job instance details",
+      "properties" : {
+        "createdAt" : {
+          "description" : "Creation time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "endTime" : {
+          "description" : "End time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "jobScheduleUuid" : {
+          "description" : "Job schedule UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "startTime" : {
+          "description" : "Start time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "state" : {
+          "description" : "Job instance state",
+          "enum" : [ "FAILED", "RUNNING", "SUCCESS", "SCHEDULED", "SKIPPED" ],
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "uuid" : {
+          "description" : "Job instance UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        }
+      },
+      "type" : "object"
+    },
+    "JobSchedule" : {
+      "properties" : {
+        "createdAt" : {
+          "description" : "Creation time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "customerUuid" : {
+          "description" : "Customer UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "executionCount" : {
+          "description" : "Total execution count",
+          "format" : "int64",
+          "readOnly" : true,
+          "type" : "integer"
+        },
+        "failedCount" : {
+          "description" : "Total failed count",
+          "format" : "int64",
+          "readOnly" : true,
+          "type" : "integer"
+        },
+        "jobConfig" : {
+          "$ref" : "#/definitions/JobConfigWrapper",
+          "description" : "Job config",
+          "readOnly" : true
+        },
+        "lastEndTime" : {
+          "description" : "Last end time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "lastJobInstanceUuid" : {
+          "description" : "Last job instance UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "lastStartTime" : {
+          "description" : "Last start time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "name" : {
+          "description" : "Job schedule name",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "nextStartTime" : {
+          "description" : "Next start time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "scheduleConfig" : {
+          "$ref" : "#/definitions/ScheduleConfig",
+          "description" : "Schedule config",
+          "readOnly" : true
+        },
+        "state" : {
+          "description" : "Job schedule state",
+          "enum" : [ "ACTIVE", "INACTIVE" ],
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "updatedAt" : {
+          "description" : "Updated time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "uuid" : {
+          "description" : "Job schedule UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        }
+      },
+      "type" : "object"
+    },
+    "JobScheduleApiFilter" : {
+      "properties" : {
+        "configClass" : {
+          "type" : "string"
+        },
+        "enabledOnly" : {
+          "type" : "boolean"
+        },
+        "nameRegex" : {
+          "type" : "string"
+        },
+        "nextStartWindowSecs" : {
+          "format" : "int64",
+          "type" : "integer"
+        },
+        "type" : {
+          "enum" : [ "FIXED_DELAY", "FIXED_RATE" ],
+          "type" : "string"
+        }
+      },
+      "required" : [ "configClass", "enabledOnly", "nameRegex", "nextStartWindowSecs", "type" ],
+      "type" : "object"
+    },
+    "JobSchedulePagedApiQuery" : {
+      "properties" : {
+        "direction" : {
+          "enum" : [ "ASC", "DESC" ],
+          "type" : "string"
+        },
+        "filter" : {
+          "$ref" : "#/definitions/JobScheduleApiFilter"
+        },
+        "limit" : {
+          "format" : "int32",
+          "type" : "integer"
+        },
+        "needTotalCount" : {
+          "type" : "boolean"
+        },
+        "offset" : {
+          "format" : "int32",
+          "type" : "integer"
+        },
+        "sortBy" : {
+          "enum" : [ "uuid", "name", "enabled", "nextStartTime", "state", "type", "createdAt", "updatedAt" ],
+          "type" : "string"
+        }
+      },
+      "required" : [ "direction", "filter", "limit", "needTotalCount", "offset", "sortBy" ],
+      "type" : "object"
+    },
+    "JobSchedulePagedApiResponse" : {
+      "properties" : {
+        "entities" : {
+          "items" : {
+            "$ref" : "#/definitions/JobScheduleResp"
+          },
+          "type" : "array"
+        },
+        "hasNext" : {
+          "type" : "boolean"
+        },
+        "hasPrev" : {
+          "type" : "boolean"
+        },
+        "totalCount" : {
+          "format" : "int32",
+          "type" : "integer"
+        }
+      },
+      "required" : [ "entities", "hasNext", "hasPrev", "totalCount" ],
+      "type" : "object"
+    },
+    "JobScheduleResp" : {
+      "description" : "Job schedule details",
+      "properties" : {
+        "createdAt" : {
+          "description" : "Creation time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "customerUuid" : {
+          "description" : "Customer UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "executionCount" : {
+          "description" : "Total execution count",
+          "format" : "int64",
+          "readOnly" : true,
+          "type" : "integer"
+        },
+        "failedCount" : {
+          "description" : "Total failed count",
+          "format" : "int64",
+          "readOnly" : true,
+          "type" : "integer"
+        },
+        "jobConfig" : {
+          "$ref" : "#/definitions/JobConfigWrapper",
+          "description" : "Job config",
+          "readOnly" : true
+        },
+        "lastEndTime" : {
+          "description" : "Last end time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "lastJobInstanceUuid" : {
+          "description" : "Last job instance UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "lastStartTime" : {
+          "description" : "Last start time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "name" : {
+          "description" : "Job schedule name",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "nextStartTime" : {
+          "description" : "Next start time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "scheduleConfig" : {
+          "$ref" : "#/definitions/ScheduleConfig",
+          "description" : "Schedule config",
+          "readOnly" : true
+        },
+        "state" : {
+          "description" : "Job schedule state",
+          "enum" : [ "ACTIVE", "INACTIVE" ],
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "updatedAt" : {
+          "description" : "Updated time",
+          "example" : "2024-07-25T13:07:18Z",
+          "format" : "date-time",
+          "readOnly" : true,
+          "type" : "string"
+        },
+        "uuid" : {
+          "description" : "Job schedule UUID",
+          "format" : "uuid",
+          "readOnly" : true,
+          "type" : "string"
+        }
+      },
       "type" : "object"
     },
     "K8SNodeResourceSpec" : {
@@ -11637,6 +12083,22 @@
       "required" : [ "status", "taskTypes", "universeUUIDList" ],
       "type" : "object"
     },
+    "ScheduleConfig" : {
+      "properties" : {
+        "disabled" : {
+          "type" : "boolean"
+        },
+        "interval" : {
+          "$ref" : "#/definitions/Duration"
+        },
+        "type" : {
+          "enum" : [ "FIXED_DELAY", "FIXED_RATE" ],
+          "type" : "string"
+        }
+      },
+      "required" : [ "disabled" ],
+      "type" : "object"
+    },
     "SchedulePagedApiQuery" : {
       "properties" : {
         "direction" : {
@@ -12951,6 +13413,24 @@
           "type" : "string"
         }
       },
+      "type" : "object"
+    },
+    "TemporalUnit" : {
+      "properties" : {
+        "dateBased" : {
+          "type" : "boolean"
+        },
+        "duration" : {
+          "$ref" : "#/definitions/Duration"
+        },
+        "durationEstimated" : {
+          "type" : "boolean"
+        },
+        "timeBased" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "dateBased", "duration", "durationEstimated", "timeBased" ],
       "type" : "object"
     },
     "ThirdpartySoftwareUpgradeParams" : {
@@ -19795,14 +20275,6 @@
           "in" : "query",
           "name" : "request",
           "required" : false
-        }, {
-          "description" : "XCluster Replication Edit Form Data",
-          "in" : "body",
-          "name" : "xcluster_replication_edit_form_data",
-          "required" : true,
-          "schema" : {
-            "$ref" : "#/definitions/XClusterConfigEditFormData"
-          }
         } ],
         "responses" : {
           "200" : {
@@ -19957,14 +20429,6 @@
           "in" : "query",
           "name" : "request",
           "required" : false
-        }, {
-          "description" : "XCluster Replication Edit Form Data",
-          "in" : "body",
-          "name" : "xcluster_replication_edit_form_data",
-          "required" : true,
-          "schema" : {
-            "$ref" : "#/definitions/XClusterConfigEditFormData"
-          }
         } ],
         "responses" : {
           "200" : {
@@ -20267,6 +20731,142 @@
         } ],
         "summary" : "Get a customer's host info",
         "tags" : [ "Customer management" ]
+      }
+    },
+    "/api/v1/customers/{cUUID}/job_schedules/page" : {
+      "post" : {
+        "description" : "",
+        "operationId" : "PageListJobSchedules",
+        "parameters" : [ {
+          "format" : "uuid",
+          "in" : "path",
+          "name" : "cUUID",
+          "required" : true,
+          "type" : "string"
+        }, {
+          "in" : "query",
+          "name" : "request",
+          "required" : false
+        }, {
+          "in" : "body",
+          "name" : "PageJobScheduleRequest",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/definitions/JobSchedulePagedApiQuery"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/JobSchedulePagedApiResponse"
+            }
+          }
+        },
+        "responsesObject" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/JobSchedulePagedApiResponse"
+            }
+          }
+        },
+        "security" : [ {
+          "apiKeyAuth" : [ ]
+        } ],
+        "summary" : "List Job Schedules (paginated)",
+        "tags" : [ "Job Scheduler" ]
+      }
+    },
+    "/api/v1/customers/{cUUID}/job_schedules/{jUUID}" : {
+      "get" : {
+        "description" : "",
+        "operationId" : "GetJobSchedule",
+        "parameters" : [ {
+          "format" : "uuid",
+          "in" : "path",
+          "name" : "cUUID",
+          "required" : true,
+          "type" : "string"
+        }, {
+          "format" : "uuid",
+          "in" : "path",
+          "name" : "jUUID",
+          "required" : true,
+          "type" : "string"
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/JobScheduleResp"
+            }
+          }
+        },
+        "responsesObject" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/JobScheduleResp"
+            }
+          }
+        },
+        "security" : [ {
+          "apiKeyAuth" : [ ]
+        } ],
+        "summary" : "Get Job Schedule",
+        "tags" : [ "Job Scheduler" ]
+      }
+    },
+    "/api/v1/customers/{cUUID}/job_schedules/{jUUID}/job_instances" : {
+      "post" : {
+        "description" : "",
+        "operationId" : "PageListJobInstances",
+        "parameters" : [ {
+          "format" : "uuid",
+          "in" : "path",
+          "name" : "cUUID",
+          "required" : true,
+          "type" : "string"
+        }, {
+          "format" : "uuid",
+          "in" : "path",
+          "name" : "jUUID",
+          "required" : true,
+          "type" : "string"
+        }, {
+          "in" : "query",
+          "name" : "request",
+          "required" : false
+        }, {
+          "in" : "body",
+          "name" : "PageJobInstanceRequest",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/definitions/JobInstancePagedApiQuery"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/JobInstancePagedApiResponse"
+            }
+          }
+        },
+        "responsesObject" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/JobInstancePagedApiResponse"
+            }
+          }
+        },
+        "security" : [ {
+          "apiKeyAuth" : [ ]
+        } ],
+        "summary" : "List Job Instances (paginated)",
+        "tags" : [ "Job Scheduler" ]
       }
     },
     "/api/v1/customers/{cUUID}/kms_configs" : {
@@ -30249,6 +30849,8 @@
     "name" : "Grafana Dashboard"
   }, {
     "name" : "Instance types"
+  }, {
+    "name" : "Job Scheduler"
   }, {
     "name" : "KubernetesOverridesController"
   }, {

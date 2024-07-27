@@ -2,16 +2,21 @@
 
 package com.yugabyte.yw.models;
 
+import static io.swagger.annotations.ApiModelProperty.AccessMode.READ_ONLY;
 import static play.mvc.Http.Status.BAD_REQUEST;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.yugabyte.yw.common.PlatformServiceException;
+import com.yugabyte.yw.models.filters.JobInstanceFilter;
+import com.yugabyte.yw.models.paging.PagedQuery;
+import com.yugabyte.yw.models.paging.PagedQuery.SortByIF;
 import io.ebean.DB;
 import io.ebean.ExpressionList;
 import io.ebean.Finder;
 import io.ebean.Model;
 import io.ebean.Query;
 import io.ebean.annotation.WhenModified;
+import io.swagger.annotations.ApiModelProperty;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -37,24 +42,34 @@ public class JobInstance extends Model implements Delayed {
   private static final Finder<UUID, JobInstance> finder =
       new Finder<UUID, JobInstance>(JobInstance.class) {};
 
-  @Id private UUID uuid;
+  @ApiModelProperty(value = "Job instance UUID", accessMode = READ_ONLY)
+  @Id
+  private UUID uuid;
 
   @Column(nullable = false)
+  @ApiModelProperty(value = "Job schedule UUID", accessMode = READ_ONLY)
   private UUID jobScheduleUuid;
 
   @Column(nullable = false)
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'")
+  @ApiModelProperty(value = "Start time", accessMode = READ_ONLY, example = "2024-07-25T13:07:18Z")
   private Date startTime;
 
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'")
+  @ApiModelProperty(value = "End time", accessMode = READ_ONLY, example = "2024-07-25T13:07:18Z")
   private Date endTime;
 
   @Enumerated(EnumType.STRING)
+  @ApiModelProperty(value = "Job instance state", accessMode = READ_ONLY)
   private State state = State.SCHEDULED;
 
   @WhenModified
   @Column(nullable = false)
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'")
+  @ApiModelProperty(
+      value = "Creation time",
+      accessMode = READ_ONLY,
+      example = "2024-07-25T13:07:18Z")
   private Date createdAt;
 
   public enum State {
@@ -63,6 +78,30 @@ public class JobInstance extends Model implements Delayed {
     SUCCESS,
     SCHEDULED,
     SKIPPED,
+  }
+
+  public enum SortBy implements PagedQuery.SortByIF {
+    uuid("uuid"),
+    jobScheduleUuid("name"),
+    startTime("startTime"),
+    endTime("endTime"),
+    state("state"),
+    createdAt("updatedAt");
+
+    private final String sortField;
+
+    SortBy(String sortField) {
+      this.sortField = sortField;
+    }
+
+    public String getSortField() {
+      return sortField;
+    }
+
+    @Override
+    public SortByIF getOrderField() {
+      return SortBy.uuid;
+    }
   }
 
   public static JobInstance getOrBadRequest(UUID uuid) {
@@ -122,6 +161,21 @@ public class JobInstance extends Model implements Delayed {
       query = query.eq("state", expectedState);
     }
     return query.update();
+  }
+
+  public static ExpressionList<JobInstance> createQuery(
+      UUID scheduleUuid, JobInstanceFilter filter) {
+    ExpressionList<JobInstance> query =
+        DB.createQuery(JobInstance.class).where().eq("jobScheduleUuid", scheduleUuid);
+    if (filter.getState() != null) {
+      query.eq("state", filter.getState());
+    }
+    if (filter.getStartWindowSecs() > 0) {
+      Instant now = Instant.now();
+      query.ge("startTime", Date.from(now));
+      query.le("startTime", Date.from(now.plus(filter.getStartWindowSecs(), ChronoUnit.SECONDS)));
+    }
+    return query;
   }
 
   @Override

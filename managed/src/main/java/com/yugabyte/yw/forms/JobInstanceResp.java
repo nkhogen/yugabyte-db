@@ -1,0 +1,20 @@
+// Copyright (c) YugaByte, Inc.
+
+package com.yugabyte.yw.forms;
+
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
+import com.yugabyte.yw.models.JobInstance;
+import io.swagger.annotations.ApiModel;
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
+@ApiModel(description = "Job instance details")
+public class JobInstanceResp {
+  @JsonUnwrapped private final JobInstance jobInstance;
+
+  public JobInstanceResp(JobInstance jobInstance) {
+    this.jobInstance = jobInstance;
+  }
+}

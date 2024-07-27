@@ -185,12 +185,29 @@ public class JobScheduler {
    *
    * @param uuid the UUID of the schedule.
    * @param scheduleConfig the new schedule config.
+   * @return the JobSchedule
    */
-  public synchronized void updateSchedule(UUID uuid, ScheduleConfig scheduleConfig) {
+  public synchronized JobSchedule updateSchedule(UUID uuid, ScheduleConfig scheduleConfig) {
     Preconditions.checkNotNull(scheduleConfig, "Schedule config must be set");
     JobSchedule jobSchedule = JobSchedule.getOrBadRequest(uuid);
+    ScheduleConfig oldScheduleConfig = jobSchedule.getScheduleConfig();
     jobSchedule.updateScheduleConfig(scheduleConfig);
-    removeJobInstanceIfPresent(uuid);
+    if (oldScheduleConfig.isDisabled() ^ scheduleConfig.isDisabled()) {
+      if (scheduleConfig.isDisabled()) {
+        removeJobInstanceIfPresent(jobSchedule.getUuid());
+      } else {
+        // Reset the next start time on enabling the schedule.
+        jobSchedule.setNextStartTime(createNextStartTime(jobSchedule, true));
+        jobSchedule.update();
+        Instant nextMaxPollTime =
+            Instant.now().plus(pollerInterval.getSeconds(), ChronoUnit.SECONDS);
+        if (nextMaxPollTime.isAfter(jobSchedule.getNextStartTime().toInstant())) {
+          // If the next execution time is arriving too soon, add it in the memory as well.
+          addJobInstanceIfAbsent(jobSchedule.getUuid());
+        }
+      }
+    }
+    return jobSchedule;
   }
 
   /**
@@ -201,26 +218,9 @@ public class JobScheduler {
    */
   public synchronized void disableSchedule(UUID uuid, boolean disable) {
     JobSchedule jobSchedule = JobSchedule.getOrBadRequest(uuid);
-    boolean wasDisabled = jobSchedule.getScheduleConfig().isDisabled();
-    if (wasDisabled ^ disable) {
-      if (disable) {
-        jobSchedule.updateScheduleConfig(
-            jobSchedule.getScheduleConfig().toBuilder().disabled(disable).build());
-        removeJobInstanceIfPresent(jobSchedule.getUuid());
-      } else {
-        // Reset the next start time on enabling the schedule.
-        jobSchedule.setNextStartTime(createNextStartTime(jobSchedule, true));
-        jobSchedule.setScheduleConfig(
-            jobSchedule.getScheduleConfig().toBuilder().disabled(disable).build());
-        jobSchedule.update();
-        Instant nextMaxPollTime =
-            Instant.now().plus(pollerInterval.getSeconds(), ChronoUnit.SECONDS);
-        if (nextMaxPollTime.isAfter(jobSchedule.getNextStartTime().toInstant())) {
-          // If the next execution time is arriving too soon, add it in the memory as well.
-          addJobInstanceIfAbsent(jobSchedule.getUuid());
-        }
-      }
-    }
+    updateSchedule(
+        jobSchedule.getUuid(),
+        jobSchedule.getScheduleConfig().toBuilder().disabled(disable).build());
   }
 
   /**
@@ -352,9 +352,19 @@ public class JobScheduler {
       return null;
     }
     JobInstance jobInstance = jobInstanceOptional.get();
-    JobSchedule jobSchedule = JobSchedule.getOrBadRequest(jobInstance.getJobScheduleUuid());
+    Optional<JobSchedule> jobScheduleOptional = Optional.empty();
     synchronized (this) {
-      if (inflightJobSchedules.computeIfPresent(jobSchedule.getUuid(), (k, v) -> false) == null) {
+      jobScheduleOptional = JobSchedule.maybeGet(jobInstance.getJobScheduleUuid());
+      if (!jobScheduleOptional.isPresent()) {
+        log.warn(
+            "Ignoring job {} for schedule {} as it is already deleted",
+            jobInstance.getUuid(),
+            jobInstance.getJobScheduleUuid());
+        return null;
+      }
+      if (inflightJobSchedules.computeIfPresent(
+              jobScheduleOptional.get().getUuid(), (k, v) -> false)
+          == null) {
         log.debug(
             "Ignoring job {} for schedule {} as it is already removed",
             jobInstance.getUuid(),
@@ -362,6 +372,7 @@ public class JobScheduler {
         return null;
       }
     }
+    JobSchedule jobSchedule = jobScheduleOptional.get();
     if (jobInstance.getState() != State.SCHEDULED) {
       updateFinalState(jobSchedule, jobInstance, null);
       log.debug(
@@ -447,7 +458,9 @@ public class JobScheduler {
       jobSchedule.setState(JobSchedule.State.INACTIVE);
       Date endTime = new Date();
       jobSchedule.setLastEndTime(endTime);
-      jobSchedule.setNextStartTime(createNextStartTime(jobSchedule, false));
+      if (!jobSchedule.getScheduleConfig().isDisabled()) {
+        jobSchedule.setNextStartTime(createNextStartTime(jobSchedule, false));
+      }
       jobSchedule.update();
       jobInstance.setEndTime(endTime);
       jobInstance.update();
