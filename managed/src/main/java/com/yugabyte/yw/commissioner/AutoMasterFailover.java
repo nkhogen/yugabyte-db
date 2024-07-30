@@ -310,11 +310,13 @@ public class AutoMasterFailover extends UniverseDefinitionTaskBase {
                   failedMasters.add(node.getNodeName());
                 }
               } else {
-                log.error(
-                    "Failing master {} in universe {} as it is not alive",
-                    ipAddress,
-                    universe.getUniverseUUID());
-                failedMasters.add(node.getNodeName());
+                // Cannot decide at this time.
+                String errMsg =
+                    String.format(
+                        "Follower lag for master %s in universe %s cannot be fetched",
+                        ipAddress, universe.getUniverseUUID());
+                log.error(errMsg);
+                throw new RuntimeException(errMsg);
               }
             });
     return failedMasters;

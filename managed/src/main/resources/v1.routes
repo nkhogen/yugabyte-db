@@ -663,3 +663,13 @@ GET /customers/:cUUID/ybdb_release/extract_metadata/:rUUID                     c
 # Upload API
 POST /customers/:cUUID/ybdb_release/upload                                     com.yugabyte.yw.controllers.ReleasesUploadController.upload(cUUID: java.util.UUID, request: Request)
 GET /customers/:cUUID/ybdb_release/upload/:rUUID                               com.yugabyte.yw.controllers.ReleasesUploadController.get(cUUID: java.util.UUID, rUUID: java.util.UUID, request: Request)
+
+# Job Scheduler APIs
++ forceNoAudit
+POST   /customers/:cUUID/job_schedules/page                                   com.yugabyte.yw.controllers.JobSchedulerController.pageJobSchedules(cUUID: java.util.UUID, request: Request)
+GET    /customers/:cUUID/job_schedules/:jUUID                                 com.yugabyte.yw.controllers.JobSchedulerController.getJobSchedule(cUUID: java.util.UUID, jUUID: java.util.UUID)
+PUT    /customers/:cUUID/job_schedules/:jUUID                                 com.yugabyte.yw.controllers.JobSchedulerController.updateJobSchedule(cUUID: java.util.UUID, jUUID: java.util.UUID, request: Request)
+PUT    /customers/:cUUID/job_schedules/:jUUID/snooze                          com.yugabyte.yw.controllers.JobSchedulerController.snoozeJobSchedule(cUUID: java.util.UUID, jUUID: java.util.UUID, request: Request)
+DELETE /customers/:cUUID/job_schedules/:jUUID                                 com.yugabyte.yw.controllers.JobSchedulerController.deleteJobSchedule(cUUID: java.util.UUID, jUUID: java.util.UUID, request: Request)
++ forceNoAudit
+POST   /customers/:cUUID/job_schedules/:jUUID/job_instances/page              com.yugabyte.yw.controllers.JobSchedulerController.pageJobInstances(cUUID: java.util.UUID, jUUID: java.util.UUID, request: Request)

@@ -23,6 +23,7 @@ import com.yugabyte.yw.models.JobInstance;
 import com.yugabyte.yw.models.JobSchedule;
 import com.yugabyte.yw.models.helpers.schedule.ScheduleConfig.ScheduleType;
 import com.yugabyte.yw.scheduler.JobScheduler;
+import io.swagger.annotations.ApiModelProperty;
 import java.io.IOException;
 import java.io.Serializable;
 import java.time.Instant;
@@ -101,7 +102,7 @@ public interface JobConfig extends Serializable {
   @JsonDeserialize(using = JobConfigWrapperDeserializer.class)
   @JsonSerialize(using = JobConfigWrapperSerializer.class)
   public static class JobConfigWrapper {
-    private JobConfig config;
+    @ApiModelProperty private JobConfig config;
 
     @JsonCreator
     public JobConfigWrapper(JobConfig config) {
