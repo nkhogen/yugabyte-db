@@ -295,10 +295,19 @@ public class JobScheduler {
         .forEach(s -> deleteSchedule(s.getUuid()));
   }
 
-  // Update dangling instance records on process restart.
   private void handleRestart() {
+    // Update dangling instance records on process restart.
     JobInstance.updateAllPending(State.SKIPPED, State.SCHEDULED);
     JobInstance.updateAllPending(State.FAILED);
+    // Make currently active schedules inactive.
+    JobSchedule.getAll().stream()
+        .filter(s -> s.getScheduleConfig().isDisabled() == false)
+        .forEach(
+            s -> {
+              s.setState(JobSchedule.State.INACTIVE);
+              s.setNextStartTime(s.getJobConfig().createNextStartTime(s, true));
+              s.save();
+            });
   }
 
   // Create the next start time for the schedule. An implementation of JobConfig can choose to
