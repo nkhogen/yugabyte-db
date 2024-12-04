@@ -772,6 +772,12 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     }
   }
 
+  @Override
+  public boolean isQueueable(TaskType taskType, ITaskParams taskParams) {
+    // TODO change me to accept placement task on a safe to run task.
+    return false;
+  }
+
   /**
    * Override this to perform additional universe state check in addition to {@link
    * #validateParams(boolean)}.

@@ -1367,10 +1367,9 @@ public class Util {
     return t.negate();
   }
 
-  public static <T> T doWithCorrelationId(Function<String, T> function) {
+  public static <T> T doWithCorrelationId(String correlationId, Function<String, T> function) {
     Map<String, String> originalContext = MDC.getCopyOfContextMap();
     try {
-      String correlationId = UUID.randomUUID().toString();
       Map<String, String> context = MDC.getCopyOfContextMap();
       if (context == null) {
         context = new HashMap<>();
@@ -1385,5 +1384,9 @@ public class Util {
         MDC.setContextMap(originalContext);
       }
     }
+  }
+
+  public static <T> T doWithCorrelationId(Function<String, T> function) {
+    return doWithCorrelationId(UUID.randomUUID().toString(), function);
   }
 }

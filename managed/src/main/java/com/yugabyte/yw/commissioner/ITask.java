@@ -5,6 +5,7 @@ package com.yugabyte.yw.commissioner;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.yugabyte.yw.forms.ITaskParams;
 import com.yugabyte.yw.models.TaskInfo;
+import com.yugabyte.yw.models.helpers.TaskType;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -81,4 +82,6 @@ public interface ITask extends Runnable {
 
   /** Returns true if this task has been tried before, else false. */
   boolean isFirstTry();
+
+  boolean isQueueable(TaskType taskType, ITaskParams taskParams);
 }

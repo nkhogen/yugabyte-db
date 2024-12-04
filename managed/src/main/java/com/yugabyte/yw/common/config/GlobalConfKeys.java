@@ -1552,4 +1552,12 @@ public class GlobalConfKeys extends RuntimeConfigKeysModule {
           "Wait for GFlag Sync in K8s universe",
           ConfDataType.IntegerType,
           ImmutableList.of(ConfKeyTags.INTERNAL));
+  public static final ConfKeyInfo<Duration> runningTaskEvictionTimeout =
+      new ConfKeyInfo<>(
+          "yb.task.eviction_timeout",
+          ScopeType.GLOBAL,
+          "Eviction Timeout for Running Tasks",
+          "Delay after which a running task is evicted by the queued task.",
+          ConfDataType.DurationType,
+          ImmutableList.of(ConfKeyTags.PUBLIC));
 }

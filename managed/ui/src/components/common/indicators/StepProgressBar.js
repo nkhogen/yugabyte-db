@@ -21,7 +21,7 @@ export default class StepProgressBar extends Component {
       ...taskDetails,
       {
         description: 'Universe created',
-        state: 'Unknown',
+        state: 'Pending',
         title: 'Done'
       }
     ];

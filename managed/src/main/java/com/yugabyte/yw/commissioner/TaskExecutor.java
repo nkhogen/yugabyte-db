@@ -42,6 +42,7 @@ import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Summary;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -66,8 +67,11 @@ import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Singleton;
+import lombok.Builder;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -307,6 +311,14 @@ public class TaskExecutor {
     }
   }
 
+  @Builder
+  @Getter
+  public static class TaskParams {
+    private TaskType taskType;
+    private ITaskParams taskParams;
+    private @Nullable UUID taskUuid;
+  }
+
   /**
    * Instantiates the task for the task class.
    *
@@ -321,36 +333,26 @@ public class TaskExecutor {
   /**
    * Creates a RunnableTask instance for a task with the given parameters.
    *
-   * @param taskType the task type.
-   * @param taskParams the task parameters.
+   * @param params the runnable task creation params.
+   * @return runnable task.
    */
-  public RunnableTask createRunnableTask(TaskType taskType, ITaskParams taskParams, UUID taskUUID) {
-    checkNotNull(taskType, "Task type must be set");
-    checkNotNull(taskParams, "Task params must be set");
-    ITask task = taskTypeMap.get(taskType).get();
-    task.initialize(taskParams);
-    return createRunnableTask(task, taskUUID);
+  public RunnableTask createRunnableTask(TaskParams params) {
+    checkNotNull(params, "Creation params cannot be null");
+    checkNotNull(params.getTaskType(), "Task type must be set");
+    checkNotNull(params.getTaskParams(), "Task params must be set");
+    ITask task = taskTypeMap.get(params.getTaskType()).get();
+    task.initialize(params.getTaskParams());
+    return createRunnableTask(task, null);
   }
 
-  /**
-   * Creates a RunnableTask instance for the given task.
-   *
-   * @param task the task.
-   */
-  public RunnableTask createRunnableTask(ITask task, UUID taskUUID) {
-    checkNotNull(task, "Task must be set");
-    try {
-      task.validateParams(task.isFirstTry());
-    } catch (PlatformServiceException e) {
-      log.error("Params validation failed for task " + task, e);
-      throw e;
-    } catch (Exception e) {
-      log.error("Params validation failed for task " + task, e);
-      throw new PlatformServiceException(BAD_REQUEST, e.getMessage());
-    }
+  /** Creates a RunnableTask instance for the given task. */
+  @VisibleForTesting
+  RunnableTask createRunnableTask(ITask task, UUID taskUUID) {
     TaskInfo taskInfo = createTaskInfo(task, taskUUID);
     taskInfo.setPosition(-1);
     taskInfo.save();
+    task.setTaskUUID(taskInfo.getUuid());
+    task.setUserTaskUUID(taskInfo.getUuid());
     return new RunnableTask(task, taskInfo);
   }
 
@@ -366,6 +368,16 @@ public class TaskExecutor {
     checkHAFollowerState();
     checkNotNull(runnableTask, "Task runnable must not be null");
     checkNotNull(taskExecutorService, "Task executor service must not be null");
+    ITask task = runnableTask.getTask();
+    try {
+      task.validateParams(task.isFirstTry());
+    } catch (PlatformServiceException e) {
+      log.error("Params validation failed for task " + task, e);
+      throw e;
+    } catch (Exception e) {
+      log.error("Params validation failed for task " + task, e);
+      throw new PlatformServiceException(BAD_REQUEST, e.getMessage());
+    }
     UUID taskUUID = runnableTask.getTaskUUID();
     runnableTasks.put(taskUUID, runnableTask);
     try {
@@ -426,7 +438,6 @@ public class TaskExecutor {
    * @return returns an optional TaskInfo that is present if the task is already found running.
    */
   public Optional<TaskInfo> abort(UUID taskUUID, boolean force) {
-    log.info("Aborting task {}", taskUUID);
     Optional<RunnableTask> optional = maybeGetRunnableTask(taskUUID);
     if (!optional.isPresent()) {
       log.info("Task {} is not found. It is either completed or non-existing", taskUUID);
@@ -437,12 +448,7 @@ public class TaskExecutor {
     if (!force && !isTaskAbortable(task.getClass())) {
       throw new RuntimeException("Task " + task.getName() + " is not abortable");
     }
-    // Signal abort to the task.
-    if (runnableTask.getAbortTime() == null) {
-      // This is not atomic but it is ok.
-      runnableTask.setAbortTime(Instant.now());
-      runnableTask.cancelWaiterIfAborted();
-    }
+    runnableTask.abort(Duration.ZERO);
     // Update the task state in the memory and DB.
     runnableTask.compareAndSetTaskState(
         Sets.immutableEnumSet(State.Initializing, State.Created, State.Running), State.Abort);
@@ -680,6 +686,7 @@ public class TaskExecutor {
             removeCompletedSubTask(iter, runnableSubTask, e.getCause());
             // Call parent task abort if abortOnFailure set.
             if (abortOnFailure && !ignoreErrors) {
+              // Abort without delay.
               runnableTask.setAbortTime(Instant.now());
               runnableTask.cancelWaiterIfAborted();
             }
@@ -691,7 +698,6 @@ public class TaskExecutor {
               log.trace("Task {} has taken {}ms", parentTaskUUID, elapsed.toMillis());
             }
             Duration timeout = runnableSubTask.getTimeLimit();
-            Instant abortTime = runnableTask.getAbortTime();
             // If the subtask execution takes long, it is interrupted.
             if (!timeout.isZero() && elapsed.compareTo(timeout) > 0) {
               anyEx = e;
@@ -700,10 +706,10 @@ public class TaskExecutor {
               // Update the subtask state to aborted if the execution timed out.
               runnableSubTask.updateTaskDetailsOnError(TaskInfo.State.Aborted, e);
               removeCompletedSubTask(iter, runnableSubTask, e);
-            } else if (abortTime != null
-                && Duration.between(abortTime, Instant.now()).compareTo(defaultAbortTaskTimeout) > 0
+            } else if (runnableSubTask.isAbortTimeReached(defaultAbortTaskTimeout)
                 && (skipSubTaskAbortableCheck
                     || isTaskAbortable(runnableSubTask.getTask().getClass()))) {
+              runnableTask.cancelWaiterIfAborted();
               future.cancel(true);
               // Report aborted to the parent task.
               // Update the subtask state to aborted if the execution timed out.
@@ -925,13 +931,12 @@ public class TaskExecutor {
         }
         writeTaskWaitMetric(taskLabels, taskScheduledTime, taskStartTime);
         publishBeforeTask();
-        if (getAbortTime() != null) {
+        if (isAbortTimeReached(Duration.ZERO)) {
           throw new CancellationException("Task " + task.getName() + " is aborted");
         }
         if (shouldRun(getTask())) {
           setTaskState(TaskInfo.State.Running);
           log.debug("Invoking run() of task {}", task.getName());
-          task.setTaskUUID(getTaskUUID());
           task.run();
         } else {
           isTaskSkipped = true;
@@ -963,10 +968,6 @@ public class TaskExecutor {
       if (t != null) {
         Throwables.propagate(t);
       }
-    }
-
-    public synchronized boolean isTaskRunning() {
-      return taskInfo.getTaskState() == TaskInfo.State.Running;
     }
 
     public synchronized boolean hasTaskCompleted() {
@@ -1005,6 +1006,19 @@ public class TaskExecutor {
      * returned, the error is suppressed.
      */
     protected abstract Throwable handleAfterRun(ITask task, Throwable t);
+
+    protected boolean isAbortTimeReached(@Nullable Duration graceTime) {
+      Instant abortTime = getAbortTime();
+      if (abortTime == null) {
+        return false;
+      }
+      long graceMillis = 0L;
+      Instant actualAbortTime = abortTime;
+      if (graceTime != null && (graceMillis = graceTime.toMillis()) > 0) {
+        actualAbortTime = actualAbortTime.plus(graceMillis, ChronoUnit.MILLIS);
+      }
+      return Instant.now().isAfter(actualAbortTime);
+    }
 
     Duration getTimeLimit() {
       return timeLimit;
@@ -1146,7 +1160,6 @@ public class TaskExecutor {
     public void run() {
       UUID taskUUID = getTaskInfo().getUuid();
       try {
-        getTask().setUserTaskUUID(taskUUID);
         super.run();
       } catch (Throwable t) {
         Throwables.propagate(t);
@@ -1321,6 +1334,24 @@ public class TaskExecutor {
       }
     }
 
+    // Restricted package level access only.
+    boolean isRunning() {
+      return runnableTasks.containsKey(getTaskUUID());
+    }
+
+    // Restricted package level access only.
+    void abort(@Nullable Duration delay) {
+      Instant abortTime = Instant.now();
+      if (delay != null && delay.toMillis() > 0) {
+        abortTime = abortTime.plus(delay.toMillis(), ChronoUnit.MILLIS);
+      }
+      // Signal abort to the task.
+      if (getAbortTime() == null || getAbortTime().isAfter(abortTime)) {
+        log.info("Aborting task {} in {} secs", getTaskUUID(), abortTime);
+        setAbortTime(abortTime);
+      }
+    }
+
     @Override
     protected boolean shouldRun(ITask task) {
       return true;
@@ -1356,8 +1387,6 @@ public class TaskExecutor {
 
     @Override
     public void run() {
-      // Sets the top-level user task UUID.
-      getTask().setUserTaskUUID(getUserTaskUUID());
       int currentAttempt = 0;
       int retryLimit = getTask().getRetryLimit();
 
@@ -1431,6 +1460,8 @@ public class TaskExecutor {
       getTaskInfo().setParentUuid(parentRunnableTask.getTaskUUID());
       getTaskInfo().setPosition(position);
       getTaskInfo().save();
+      getTask().setTaskUUID(getTaskInfo().getUuid());
+      getTask().setUserTaskUUID(parentRunnableTask.getTaskUUID());
     }
 
     @Override

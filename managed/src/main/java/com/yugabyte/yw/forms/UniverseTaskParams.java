@@ -323,4 +323,10 @@ public class UniverseTaskParams extends AbstractTaskParams {
   public boolean isRunOnlyPrechecks() {
     return runOnlyPrechecks;
   }
+
+  @JsonIgnore
+  @Override
+  public UUID getTargetUuid() {
+    return getUniverseUUID();
+  }
 }
