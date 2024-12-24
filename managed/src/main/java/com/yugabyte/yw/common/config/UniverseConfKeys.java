@@ -1412,4 +1412,12 @@ public class UniverseConfKeys extends RuntimeConfigKeysModule {
           "Enable option for creating backup schedules that support off-cluster PITR",
           ConfDataType.BooleanType,
           ImmutableList.of(ConfKeyTags.PUBLIC));
+  public static final ConfKeyInfo<Duration> queuedTaskWaitTime =
+      new ConfKeyInfo<>(
+          "yb.task.queue_wait_time",
+          ScopeType.UNIVERSE,
+          "Queue Wait Time for Tasks",
+          "Wait time for a queued task before the running task can be evicted forcefully.",
+          ConfDataType.DurationType,
+          ImmutableList.of(ConfKeyTags.PUBLIC));
 }
