@@ -5,6 +5,7 @@ package util
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -67,6 +68,32 @@ func setupGrpcLogger(config *Config) {
 	grpclog.SetLoggerV2(grpclog.NewLoggerV2(writer, writer, writer))
 }
 
+func NewFileAppLogger(
+	path string,
+	maxSizeMB, maxBackups, maxAgeDays int,
+	level log.Level,
+	enableConsole bool,
+) *AppLogger {
+	jLogger := &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    maxSizeMB,
+		MaxBackups: maxBackups,
+		MaxAge:     maxAgeDays,
+		Compress:   true,
+	}
+	var writer io.Writer = jLogger
+	if enableConsole {
+		writer = io.MultiWriter(os.Stdout, jLogger)
+	}
+	return &AppLogger{
+		logger: &log.Logger{
+			Handler: logfmt.New(writer),
+			Level:   level,
+		},
+		enableDebug: true,
+	}
+}
+
 // Returns the file logger.
 func FileLogger() *AppLogger {
 	onceFileLogger.Do(func() {
@@ -83,20 +110,14 @@ func FileLogger() *AppLogger {
 		}
 		setupGrpcLogger(config)
 		logFilepath := filepath.Join(LogsDir(), config.String(NodeAgentLoggerKey))
-		writer := &lumberjack.Logger{
-			Filename:   logFilepath,
-			MaxSize:    config.Int(NodeAgentLogMaxMbKey),
-			MaxBackups: config.Int(NodeAgentLogMaxBackupsKey),
-			MaxAge:     config.Int(NodeAgentLogMaxDaysKey),
-			Compress:   true,
-		}
-		fileLogger = &AppLogger{
-			logger: &log.Logger{
-				Handler: logfmt.New(writer),
-				Level:   log.Level(config.Int(NodeAgentLogLevelKey)),
-			},
-			enableDebug: true,
-		}
+		fileLogger = NewFileAppLogger(
+			logFilepath,
+			config.Int(NodeAgentLogMaxMbKey),
+			config.Int(NodeAgentLogMaxBackupsKey),
+			config.Int(NodeAgentLogMaxDaysKey),
+			log.Level(config.Int(NodeAgentLogLevelKey)),
+			false,
+		)
 	})
 	return fileLogger
 }

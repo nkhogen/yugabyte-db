@@ -98,10 +98,15 @@ build_pymodule() {
     popd
 }
 
-get_executable_name() {
+get_executable_name(){
+    local num_args="$#"
     local os=$1
     local arch=$2
-    executable=${package_name}-${os}-${arch}
+    local suffix=""
+    if [ "$num_args" -gt 2 ]; then
+        suffix="-$3"
+    fi
+    executable=${package_name}${suffix}-${os}-${arch}
     if [ "$os" = "windows" ]; then
         executable+='.exe'
     fi
@@ -113,19 +118,13 @@ prepare() {
     generate_golang_grpc_files
 }
 
-build_for_platform() {
-    local os=$1
-    local arch=$2
-    exec_name=$(get_executable_name "$os" "$arch")
-    echo "Building ${exec_name}"
-    executable="$build_output_dir/$exec_name"
+build_ynp_python() {
     pushd "$project_dir"
     WHEEL_DIR="./pywheels"
     mkdir -p "$WHEEL_DIR"
     # Read requirements.txt and download packages
     while IFS= read -r pkg || [ -n "$pkg" ]; do
         echo "Downloading $pkg..."
-
         # Special handling for setuptools - download as wheel
         if [[ "$pkg" == setuptools* || "$pkg" == wheel* ]]; then
             echo "Downloading setuptools as wheel (no build dependencies)..."
@@ -148,6 +147,32 @@ build_for_platform() {
             python3 -m pip download "$pkg" --no-binary=:all: --dest "$WHEEL_DIR"
         fi
     done < ynp_requirements_3.6.txt
+    popd
+}
+
+build_ynp_go() {
+    local exec_name=$(get_executable_name "$os" "$arch" "ynp")
+    local executable="$build_output_dir/$exec_name"
+    pushd "$project_dir"
+    echo "Building ${exec_name}"
+    env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+    go build -o "$executable" "$project_dir"/ynp/cmd/main.go
+    if [ $? -ne 0 ]; then
+        echo "Build failed for $exec_name"
+        exit 1
+    fi
+    popd
+}
+
+build_for_platform() {
+    local os=$1
+    local arch=$2
+    build_ynp_python
+    build_ynp_go
+    local exec_name=$(get_executable_name "$os" "$arch")
+    local executable="$build_output_dir/$exec_name"
+    pushd "$project_dir"
+    echo "Building ${exec_name}"
     env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
     go build -o "$executable" "$project_dir"/cmd/cli/main.go
     if [ $? -ne 0 ]; then
@@ -230,10 +255,7 @@ package_for_platform() {
     templates_dir="${version_dir}/templates"
     echo "Packaging ${staging_dir_name}"
     os_exec_name=$(get_executable_name "$os" "$arch")
-    exec_name="node-agent"
-    if [ $os == "windows" ]; then
-        exec_name+='.exe'
-    fi
+    ynp_exec_name=$(get_executable_name "$os" "$arch" "ynp")
     pushd "$build_output_dir"
     echo "Creating staging directory ${staging_dir_name}"
     rm -rf "$staging_dir_name"
@@ -241,7 +263,8 @@ package_for_platform() {
     mkdir -p "$script_dir"
     mkdir -p "$bin_dir"
     mkdir -p "$templates_dir"
-    cp -rf "$os_exec_name" "${bin_dir}/$exec_name"
+    cp -rf "$os_exec_name" "${bin_dir}/node-agent"
+    cp -rf "$ynp_exec_name" "${bin_dir}/node-provisioner"
     # Follow the symlinks.
     cp -Lf ../version.txt "${version_dir}"/version.txt
     cp -Lf ../version_metadata.json "${version_dir}"/version_metadata.json

@@ -1,0 +1,34 @@
+logging:
+  directory: ./logs
+  file: app.log
+  level: INFO
+yba:
+  api_key: 4.a9190fe6-1067-409f-95cf-dbd96893c9c9.cf4d53f4-1484-4cf0-84fb-d32c48ea1d4c
+  customer_uuid: f33e3c9b-75ab-4c30-80ad-cba85646ea39
+  instance_type:
+    cores: 4
+    memory_size: 16
+    mount_points:
+    - /mnt/d0
+    name: nsingh-instance-5
+    volume_size: 100
+  node_external_fqdn: 10.9.94.179
+  node_name: nsingh-instance-5
+  provider:
+    name: onprem-ynp-test-provider
+    region:
+      name: us-west-2
+      zone:
+        name: us-west-2a
+  url: http://100.107.149.122:9000
+ynp:
+  chrony_servers:
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+  is_airgap: false
+  is_install_node_agent: true
+  node_ip: 127.0.0.1
+  tmp_directory: /tmp
+  use_system_level_systemd: false
+  yb_home_dir: /home/yugabyte
+  yb_user_id: 1001
